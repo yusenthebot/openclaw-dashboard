@@ -6,18 +6,17 @@ A beautiful, zero-dependency command center for [OpenClaw](https://github.com/op
 
 ## Features
 
-### 10 Dashboard Panels
+### 9 Dashboard Panels
 
 1. **🔔 Header Bar** — Bot name, online/offline status, auto-refresh countdown
 2. **⚠️ Alerts Banner** — Smart alerts for high costs, failed crons, high context usage, gateway offline
 3. **💚 System Health** — Gateway status, PID, uptime, memory, compaction mode, active session count
 4. **💰 Cost Cards** — Today's cost, all-time cost, projected monthly, cost breakdown donut chart
-5. **📋 Kanban Board** — To Do / In Progress / Blocked / Done Today task tracking
-6. **⏰ Cron Jobs** — All scheduled jobs with status, schedule, last/next run, duration, model
-7. **📡 Active Sessions** — Recent sessions with model, type badges (DM/group/cron/subagent), context %, tokens
-8. **📊 Token Usage & Cost** — Per-model breakdown with today/all-time toggle, usage bars, totals
-9. **🤖 Sub-Agent Activity** — Sub-agent runs with cost, duration, status + token breakdown
-10. **🧩 Bottom Row** — Available models grid, skills list, git log
+5. **⏰ Cron Jobs** — All scheduled jobs with status, schedule, last/next run, duration, model
+6. **📡 Active Sessions** — Recent sessions with model, type badges (DM/group/cron/subagent), context %, tokens
+7. **📊 Token Usage & Cost** — Per-model breakdown with today/all-time toggle, usage bars, totals
+8. **🤖 Sub-Agent Activity** — Sub-agent runs with cost, duration, status + token breakdown
+9. **🧩 Bottom Row** — Available models grid, skills list, git log
 
 ### Key Features
 
