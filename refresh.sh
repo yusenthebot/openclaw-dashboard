@@ -195,7 +195,10 @@ if os.path.exists(cron_path):
 
 # ── Token usage from JSONL ──
 def model_name(model):
+    # Strip provider prefix (e.g. "openai-codex/gpt-5.3-codex" -> "gpt-5.3-codex")
     ml = model.lower()
+    if '/' in ml:
+        ml = ml.split('/', 1)[1]
     if 'opus-4-6' in ml: return 'Claude Opus 4.6'
     elif 'opus' in ml: return 'Claude Opus 4.5'
     elif 'sonnet' in ml: return 'Claude Sonnet'
@@ -206,7 +209,12 @@ def model_name(model):
     elif 'gemini-3-flash' in ml: return 'Gemini 3 Flash'
     elif 'gemini-2.5-flash' in ml: return 'Gemini 2.5 Flash'
     elif 'gemini' in ml or 'flash' in ml: return 'Gemini Flash'
+    elif 'minimax-m2.5' in ml: return 'MiniMax M2.5'
+    elif 'minimax-m2' in ml or 'minimax' in ml: return 'MiniMax'
+    elif 'glm-5' in ml: return 'GLM-5'
+    elif 'glm-4' in ml: return 'GLM-4'
     elif 'k2p5' in ml or 'kimi' in ml: return 'Kimi K2.5'
+    elif 'gpt-5.3-codex' in ml: return 'GPT-5.3 Codex'
     elif 'gpt-5' in ml: return 'GPT-5'
     elif 'gpt-4o' in ml: return 'GPT-4o'
     elif 'gpt-4' in ml: return 'GPT-4'
@@ -225,7 +233,7 @@ subagent_today = defaultdict(new_bucket)
 # Sub-agent activity tracking
 subagent_runs = []
 
-for f in glob.glob(os.path.join(base, '*/sessions/*.jsonl')):
+for f in glob.glob(os.path.join(base, '*/sessions/*.jsonl')) + glob.glob(os.path.join(base, '*/sessions/*.jsonl.deleted.*')):
     sid = os.path.basename(f).replace('.jsonl', '')
     session_key = None
     # Find session key for this sid
