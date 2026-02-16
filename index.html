@@ -247,14 +247,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
   <div class="section-header">
     <span class="section-title">📈 Charts & Trends</span>
     <div style="display:flex;align-items:center;gap:8px">
-      <div class="tab-group" id="chartTabGroup" style="display:none">
+      <div class="tab-group" id="chartTabGroup">
         <button class="tab-btn active" id="cTab7" onclick="chartDays=7;renderCharts()">7 Days</button>
         <button class="tab-btn" id="cTab30" onclick="chartDays=30;renderCharts()">30 Days</button>
       </div>
-      <button class="chart-toggle" id="chartToggleBtn" onclick="toggleCharts()">Show Charts</button>
+      <!-- toggle removed -->
     </div>
   </div>
-  <div id="chartsContainer" style="display:none">
+  <div id="chartsContainer">
     <div class="grid-3">
       <div class="glass chart-container"><div class="chart-title">Daily Cost Trend</div><div id="costChart"></div></div>
       <div class="glass chart-container"><div class="chart-title">Cost by Model</div><div id="modelChart"></div></div>
@@ -554,7 +554,7 @@ function render(){
   renderTokenTbl('stBody',stData,'var(--purple)');
 
   // Charts
-  if(chartsVisible)renderCharts();
+  renderCharts();
 
   // Models
   $('modelsGrid').innerHTML=(D.availableModels||[]).map(m=>`<div class="glass model-card"><span class="badge badge-${m.status}">${m.status}</span><div class="model-name">${esc(m.name)}</div><div class="model-id">${esc(m.provider)}</div></div>`).join('');
@@ -585,14 +585,7 @@ function setTabCls4(prefix,tab,cls){
   $(prefix+'A').className='tab-btn'+(tab==='all'?' '+cls:'');
 }
 
-let chartsVisible=false,chartDays=7;
-
-function toggleCharts(){
-  chartsVisible=!chartsVisible;
-  $('chartsContainer').style.display=chartsVisible?'block':'none';
-  $('chartTabGroup').style.display=chartsVisible?'flex':'none';
-  $('chartToggleBtn').textContent=chartsVisible?'Hide Charts':'Show Charts';
-  if(chartsVisible)renderCharts();
+let chartDays=7;
 }
 
 function renderCharts(){
