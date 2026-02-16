@@ -4,9 +4,7 @@
     "emoji": "\ud83e\udd9e"
   },
   "theme": {
-    "preset": "dark",
-    "accent": "#6366f1",
-    "accentSecondary": "#9333ea"
+    "preset": "midnight"
   },
   "panels": {
     "kanban": true,
