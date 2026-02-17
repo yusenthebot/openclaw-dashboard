@@ -1,6 +1,6 @@
 # TECHNICAL.md — OpenClaw Dashboard Internals
 
-> **Version:** 2.3.0 · **Repo:** [github.com/mudrii/openclaw-dashboard](https://github.com/mudrii/openclaw-dashboard)
+> **Version:** 2.5.0 · **Repo:** [github.com/mudrii/openclaw-dashboard](https://github.com/mudrii/openclaw-dashboard)
 >
 > This document covers architecture, data flow, and implementation details for developers and contributors. For features and quick start, see [README.md](README.md).
 
@@ -28,7 +28,8 @@
 
 | File | Lines | Purpose |
 |------|------:|---------|
-| `index.html` | 462 | Single-file frontend — embedded CSS + JS, glass morphism dark theme, 9 dashboard panels |
+| `index.html` | ~550 | Single-file frontend — embedded CSS + JS, glass morphism themed UI, 10 dashboard panels, 6 themes, 3 SVG charts |
+| `themes.json` | 168 | Theme definitions — 6 built-in themes (3 dark + 3 light), 19 CSS variables each |
 | `server.py` | 191 | Python HTTP server — static files + `/api/refresh` endpoint with debounce |
 | `refresh.sh` | 470 | Bash wrapper invoking inline Python to parse OpenClaw data → `data.json` |
 | `install.sh` | 151 | Cross-platform installer (macOS LaunchAgent / Linux systemd) |
@@ -138,12 +139,16 @@ Sessions with `:run:` in the key are skipped (duplicate cron run sessions).
 
 ### Token Aggregation
 
-For each `.jsonl` file, the script reads every line, filters for `assistant` role messages with non-zero `usage.totalTokens`, and aggregates into four `defaultdict` buckets:
+For each `.jsonl` file, the script reads every line, filters for `assistant` role messages with non-zero `usage.totalTokens`, and aggregates into eight `defaultdict` buckets:
 
 - **`models_all`** — all-time per-model totals
 - **`models_today`** — today-only per-model totals (compared against `today_str` in GMT+8)
+- **`models_7d`** — last 7 days per-model totals
+- **`models_30d`** — last 30 days per-model totals
 - **`subagent_all`** — all-time subagent-only totals
 - **`subagent_today`** — today subagent-only totals
+- **`subagent_7d`** — last 7 days subagent-only totals
+- **`subagent_30d`** — last 30 days subagent-only totals
 
 Each bucket tracks: `calls`, `input`, `output`, `cacheRead`, `totalTokens`, `cost`.
 
@@ -251,7 +256,36 @@ A centered `.donut-hole` div (55% size, page background color) creates the hole 
 
 ### Tab State
 
-Three tab variables control today/all-time views: `uTab` (token usage), `srTab` (subagent runs), `stTab` (subagent tokens). Tab buttons call `render()` which reads the current tab state.
+Three tab variables control today/7d/30d/all-time views: `uTab` (token usage), `srTab` (subagent runs), `stTab` (subagent tokens). Tab buttons update the variable and call `render()` which reads the current tab state.
+
+The `switchTab` pattern uses `setTabCls4(prefix, tab, cls)` which updates four tab buttons (`T`, `7`, `30`, `A` suffixes) to set the active CSS class.
+
+### Charts & Trends
+
+Three pure SVG charts render in a `.grid-3` layout, controlled by a `chartDays` variable (7 or 30):
+
+| Chart | Function | Visualization |
+|-------|----------|--------------|
+| **Daily Cost Trend** | `renderCostChart()` | Line chart with area fill — plots `dailyChart[].total` |
+| **Cost by Model** | `renderModelChart()` | Stacked bar chart — breaks down daily cost by top 6 models + "Other" |
+| **Sub-Agent Activity** | `renderSubagentChart()` | Dual-axis: bars for run count (left axis), line for cost (right axis) |
+
+All charts are generated as inline `<svg>` elements with `viewBox="0 0 400 300"`. No external charting library. Data comes from the `dailyChart` array in `data.json`. Chart toggle buttons (`cTab7` / `cTab30`) call `renderCharts()` directly.
+
+### Theme Engine
+
+The theme system loads themes from `themes.json` at startup and applies them by setting 19 CSS custom properties on `document.documentElement`:
+
+| Function | Purpose |
+|----------|---------|
+| `loadThemes()` | Fetches `themes.json`, restores saved theme from `localStorage('ocDashTheme')`, calls `applyTheme()` |
+| `applyTheme(id)` | Sets all 19 `--*` CSS variables from `THEMES[id].colors`, saves to `localStorage` |
+| `renderThemeMenu()` | Builds the dropdown menu, grouping themes by `type` (`dark` / `light`) |
+| `toggleThemeMenu()` | Toggles `.open` class on `#themeMenu` |
+
+The 19 CSS variables controlled by themes: `bg`, `surface`, `surfaceHover`, `border`, `accent`, `accent2`, `green`, `yellow`, `red`, `orange`, `purple`, `text`, `textStrong`, `muted`, `dim`, `darker`, `tableBg`, `tableHover`, `scrollThumb`.
+
+Theme state is stored globally in `THEMES` (all definitions) and `currentTheme` (active theme ID). Clicking outside the theme picker closes the menu via a `document.addEventListener('click', ...)` handler.
 
 ---
 
@@ -373,6 +407,8 @@ Each setting resolves through a priority chain (highest wins):
 |-----|------|-------------|
 | `subagentRuns` | `array` | Last 30 sub-agent runs (all time) |
 | `subagentRunsToday` | `array` | Last 20 sub-agent runs (today) |
+| `subagentRuns7d` | `array` | Last 50 sub-agent runs (7 days) |
+| `subagentRuns30d` | `array` | Last 100 sub-agent runs (30 days) |
 | `subagentRuns[].task` | `string` | Session key (truncated to 60 chars) |
 | `subagentRuns[].model` | `string` | Last model used |
 | `subagentRuns[].cost` | `number` | Total session cost (4 decimal places) |
@@ -382,10 +418,12 @@ Each setting resolves through a priority chain (highest wins):
 | `subagentRuns[].date` | `string` | `"YYYY-MM-DD"` |
 | `subagentCostAllTime` | `number` | Total sub-agent cost (all time) |
 | `subagentCostToday` | `number` | Total sub-agent cost (today) |
+| `subagentCost7d` | `number` | Total sub-agent cost (7 days) |
+| `subagentCost30d` | `number` | Total sub-agent cost (30 days) |
 
 ### Token Usage
 
-Applies to `tokenUsage`, `tokenUsageToday`, `subagentUsage`, `subagentUsageToday`:
+Applies to `tokenUsage`, `tokenUsageToday`, `tokenUsage7d`, `tokenUsage30d`, `subagentUsage`, `subagentUsageToday`, `subagentUsage7d`, `subagentUsage30d`:
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -422,6 +460,20 @@ Sorted by cost descending.
 | `gitLog[].hash` | `string` | Short commit hash |
 | `gitLog[].message` | `string` | Commit message subject |
 | `gitLog[].ago` | `string` | Relative time (`"2 hours ago"`) |
+
+### Daily Chart (Charts & Trends)
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `dailyChart` | `array` | Last 30 days of daily aggregated data |
+| `dailyChart[].date` | `string` | `"YYYY-MM-DD"` |
+| `dailyChart[].label` | `string` | `"MM-DD"` (for chart X-axis labels) |
+| `dailyChart[].total` | `number` | Total cost for the day |
+| `dailyChart[].tokens` | `number` | Total tokens for the day |
+| `dailyChart[].calls` | `number` | Total API calls for the day |
+| `dailyChart[].subagentCost` | `number` | Sub-agent cost for the day |
+| `dailyChart[].subagentRuns` | `number` | Sub-agent run count for the day |
+| `dailyChart[].models` | `object` | Per-model cost breakdown: `{modelName: cost}` (top 6 + "Other") |
 
 ### Alerts
 
@@ -517,7 +569,7 @@ systemctl --user status openclaw-dashboard
 - **Hardcoded timezone:** GMT+8 (`timezone(timedelta(hours=8))`) in `refresh.sh` — affects "today" calculations and all timestamps
 - **No authentication** — relies on network-level access control
 - **Polling only** — no WebSocket; frontend polls every 60s, server debounces at 30s
-- **No historical data** — only current state; no time-series, no trends
+- **Limited historical data** — `dailyChart` provides 30 days of daily aggregates; no finer granularity
 - **Kanban panel** — referenced in `config.json` (`panels.kanban`) but removed from the UI
 - **Simplistic cost projection** — `today × 30`, not based on historical average
 - **Context % calculation** — `totalTokens / contextTokens × 100` (may exceed 100% in edge cases, capped in display)
