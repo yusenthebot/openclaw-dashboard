@@ -6,17 +6,18 @@ A beautiful, zero-dependency command center for [OpenClaw](https://github.com/op
 
 ## Features
 
-### 9 Dashboard Panels
+### 10 Dashboard Panels
 
-1. **🔔 Header Bar** — Bot name, online/offline status, auto-refresh countdown
+1. **🔔 Header Bar** — Bot name, online/offline status, auto-refresh countdown, theme picker
 2. **⚠️ Alerts Banner** — Smart alerts for high costs, failed crons, high context usage, gateway offline
 3. **💚 System Health** — Gateway status, PID, uptime, memory, compaction mode, active session count
 4. **💰 Cost Cards** — Today's cost, all-time cost, projected monthly, cost breakdown donut chart
 5. **⏰ Cron Jobs** — All scheduled jobs with status, schedule, last/next run, duration, model
 6. **📡 Active Sessions** — Recent sessions with model, type badges (DM/group/cron/subagent), context %, tokens
-7. **📊 Token Usage & Cost** — Per-model breakdown with today/all-time toggle, usage bars, totals
-8. **🤖 Sub-Agent Activity** — Sub-agent runs with cost, duration, status + token breakdown
-9. **🧩 Bottom Row** — Available models grid, skills list, git log
+7. **📊 Token Usage & Cost** — Per-model breakdown with 7d/30d/all-time tabs, usage bars, totals
+8. **🤖 Sub-Agent Activity** — Sub-agent runs with cost, duration, status + token breakdown (7d/30d tabs)
+9. **📈 Charts & Trends** — Cost trend line, model cost breakdown bars, sub-agent activity — all pure SVG, 7d/30d toggle
+10. **🧩 Bottom Row** — Available models grid, skills list, git log
 
 ### Key Features
 
@@ -171,11 +172,7 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for full details.
 
 ## Screenshots
 
-> Screenshots coming soon. The dashboard features a dark glass-morphism UI with:
-> - Gradient header with live status indicator
-> - Cost cards with animated donut chart
-> - Sortable tables with usage bars
-> - Responsive grid layout
+![Dashboard with Charts](screenshots/dashboard-charts.png)
 
 ## Uninstall
 
@@ -202,6 +199,15 @@ rm -rf ~/.openclaw/dashboard
 - Modern web browser
 
 ## Changelog
+
+### v2.5.0
+
+- **New**: 📈 Charts & Trends section — 3 always-visible pure SVG charts (cost trend, model breakdown, sub-agent activity)
+- **New**: 7d/30d time filter tabs on Token Usage, Sub-Agent Activity, and Sub-Agent Token Breakdown panels
+- **New**: Charts have their own 7d/30d toggle, default to 7 days
+- **New**: Daily aggregation in `refresh.sh` — 30 days of `dailyChart` data with per-model cost breakdown
+- **New**: `models_7d`, `models_30d`, `subagent_7d`, `subagent_30d` data buckets
+- **Improved**: `refresh.sh` now collects 35 data keys for richer time-series analysis
 
 ### v2.4.0
 
