@@ -56,7 +56,7 @@ alert_cfg = dc.get('alerts', {})
 COST_THRESHOLD_HIGH = alert_cfg.get('dailyCostHigh', 50)
 COST_THRESHOLD_WARN = alert_cfg.get('dailyCostWarn', 20)
 CONTEXT_THRESHOLD = alert_cfg.get('contextPct', 80)
-MEMORY_THRESHOLD_KB = alert_cfg.get('memoryMb', 500) * 1024
+MEMORY_THRESHOLD_KB = alert_cfg.get('memoryMb', 640) * 1024
 
 # ── Gateway health ──
 gateway = {"status": "offline", "pid": None, "uptime": "", "memory": "", "rss": 0}

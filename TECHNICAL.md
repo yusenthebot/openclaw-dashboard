@@ -167,7 +167,7 @@ Alerts are generated based on configurable thresholds:
 | Daily cost high | `alerts.dailyCostHigh` (50) | `high` |
 | Daily cost warn | `alerts.dailyCostWarn` (20) | `medium` |
 | High context usage | `alerts.contextPct` (80%) | `medium` |
-| High memory | `alerts.memoryMb` (500) × 1024 KB | `medium` |
+| High memory | `alerts.memoryMb` (640) × 1024 KB | `medium` |
 | Gateway offline | *(always checked)* | `critical` |
 | Cron job failed | `lastStatus === 'error'` | `high` |
 
@@ -333,7 +333,7 @@ Each setting resolves through a priority chain (highest wins):
 | Daily cost high | — | — | `alerts.dailyCostHigh` | `50` |
 | Daily cost warn | — | — | `alerts.dailyCostWarn` | `20` |
 | Context % threshold | — | — | `alerts.contextPct` | `80` |
-| Memory threshold | — | — | `alerts.memoryMb` | `500` |
+| Memory threshold | — | — | `alerts.memoryMb` | `640` |
 
 **Implementation detail:** `server.py` loads config.json first, then applies env vars, then CLI args (via `argparse` defaults set to the env/config value). The `resolve_config_value()` utility function exists but the actual `main()` uses a manual cascade.
 
