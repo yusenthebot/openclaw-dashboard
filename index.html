@@ -519,11 +519,13 @@ function renderThemeMenu(){
   const lightThemes=Object.entries(THEMES).filter(([,t])=>t.type==='light');
   let html='<div class="theme-menu-label">Dark Themes</div>';
   darkThemes.forEach(([id,t])=>{
-    html+=`<button class="theme-opt${id===currentTheme?' active':''}" onclick="applyTheme('${esc(id)}');event.stopPropagation()"><span class="theme-opt-icon">${esc(t.icon)}</span><span>${esc(t.name)}</span><span class="theme-opt-swatch" style="background:${safeColor(t.colors.accent)};margin-left:auto"></span></button>`;
+    const accent = safeColor(t.colors && t.colors.accent ? t.colors.accent : '#888888');
+    html+=`<button class="theme-opt${id===currentTheme?' active':''}" onclick="applyTheme('${esc(id)}');event.stopPropagation()"><span class="theme-opt-icon">${esc(t.icon)}</span><span>${esc(t.name)}</span><span class="theme-opt-swatch" style="background:${accent};margin-left:auto"></span></button>`;
   });
   html+='<div class="theme-menu-label" style="margin-top:4px">Light Themes</div>';
   lightThemes.forEach(([id,t])=>{
-    html+=`<button class="theme-opt${id===currentTheme?' active':''}" onclick="applyTheme('${esc(id)}');event.stopPropagation()"><span class="theme-opt-icon">${esc(t.icon)}</span><span>${esc(t.name)}</span><span class="theme-opt-swatch" style="background:${safeColor(t.colors.accent)};margin-left:auto"></span></button>`;
+    const accent = safeColor(t.colors && t.colors.accent ? t.colors.accent : '#888888');
+    html+=`<button class="theme-opt${id===currentTheme?' active':''}" onclick="applyTheme('${esc(id)}');event.stopPropagation()"><span class="theme-opt-icon">${esc(t.icon)}</span><span>${esc(t.name)}</span><span class="theme-opt-swatch" style="background:${accent};margin-left:auto"></span></button>`;
   });
   menu.innerHTML=html;
 }
@@ -661,7 +663,7 @@ function render(){
 
   // Token usage
   setTabCls4('uTab',uTab,'active');
-  if (sectionChanged(['tokenUsage','tokenUsageToday','tokenUsage7d','tokenUsage30d','subagentUsage','subagentUsageToday','subagentUsage7d','subagentUsage30d']) || uTab !== prevUTab || stTab !== prevStTab) {
+  if (sectionChanged(['tokenUsage','tokenUsageToday','tokenUsage7d','tokenUsage30d','subagentUsage','subagentUsageToday','subagentUsage7d','subagentUsage30d']) || uTab !== prevUTab) {
     const uData=uTab==='today'?D.tokenUsageToday:uTab==='7d'?D.tokenUsage7d:uTab==='30d'?D.tokenUsage30d:D.tokenUsage;
     renderTokenTbl('uBody',uData,'var(--accent)');
   }
@@ -681,13 +683,13 @@ function render(){
 
   // Sub token
   setTabCls4('stTab',stTab,'active-purple');
-  if (sectionChanged(['tokenUsage','tokenUsageToday','tokenUsage7d','tokenUsage30d','subagentUsage','subagentUsageToday','subagentUsage7d','subagentUsage30d']) || uTab !== prevUTab || stTab !== prevStTab) {
+  if (sectionChanged(['tokenUsage','tokenUsageToday','tokenUsage7d','tokenUsage30d','subagentUsage','subagentUsageToday','subagentUsage7d','subagentUsage30d']) || stTab !== prevStTab) {
     const stData=stTab==='today'?D.subagentUsageToday:stTab==='7d'?D.subagentUsage7d:stTab==='30d'?D.subagentUsage30d:D.subagentUsage;
     renderTokenTbl('stBody',stData,'var(--purple)');
   }
 
   // Charts
-  if (sectionChanged(['dailyChart','chartDays']) || chartDays!==prevChartDays) {
+  if (sectionChanged(['dailyChart']) || chartDays!==prevChartDays) {
     renderCharts();
   }
 
