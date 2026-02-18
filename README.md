@@ -4,6 +4,24 @@ A beautiful, zero-dependency command center for [OpenClaw](https://github.com/op
 
 ![Dashboard Full View](screenshots/00-full-dashboard.png)
 
+## Why This Exists
+
+When you run OpenClaw seriously — multiple agents, dozens of cron jobs, sub-agents spawning sub-agents, several Telegram groups, 10+ models — information gets scattered fast.
+
+**The problem:** there was no single place to answer the obvious questions:
+- Is my gateway actually running right now?
+- How much have I spent today, and which model is burning the most?
+- Which cron jobs ran, which failed, and when does the next one fire?
+- What sessions are active and how much context are they consuming?
+- Are my sub-agents doing useful work or spinning in circles?
+- What's the cost trend over the last 7 days — am I accelerating?
+
+The only way to answer these was digging through log files, running CLI commands, and mentally stitching together a picture from 5 different sources. That friction adds up.
+
+**The solution:** a single local page that collects everything in one place — gateway health, costs, cron status, active sessions, sub-agent runs, model usage, git log — refreshed automatically, no login, no cloud, no external dependencies. Open a browser tab, get the full picture in seconds.
+
+It's not trying to replace the OpenClaw CLI or Telegram interface. It's the at-a-glance overview layer that tells you whether everything is healthy and where your money and compute are going — so you can make decisions without hunting for data.
+
 ## Features
 
 ### 10 Dashboard Panels
