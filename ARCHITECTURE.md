@@ -43,8 +43,9 @@ Five plain JS objects inside a single `<script>` tag. No classes, no frameworks.
 Timer tick / manual refresh
   → DataLayer.fetch()
   → State.update(newData)
-  → DirtyChecker.diff(State.current, State.prev)
-  → Renderer.render(dirtyFlags)
+  → State.snapshot() → snap
+  → DirtyChecker.computeDirtyFlags(snap)
+  → Renderer.render(snap, dirtyFlags)
   → State.commitPrev()
 ```
 
@@ -71,6 +72,7 @@ Timer tick / manual refresh
 | `setChartDays(n)` | Sets `chartDays` |
 | `commitPrev()` | Copies `data` → `prev`, `tabs` → `prevTabs`, `chartDays` → `prevChartDays` |
 | `resetCountdown()` | Sets `countdown = 60` |
+| `snapshot()` | Returns deep-frozen copy of current state for render cycle use |
 | `tick()` | Decrements `countdown`, returns `true` if hit 0 |
 
 **Depends on:** Nothing.
@@ -97,11 +99,11 @@ Timer tick / manual refresh
 | `stableChanged(arrKey, fields)` | Like `sectionChanged` but uses `stableSnapshot()` — strips volatile timestamps |
 | `tabChanged(group)` | `State.tabs[group] !== State.prevTabs[group]` |
 | `chartDaysChanged()` | `State.chartDays !== State.prevChartDays` |
-| `computeDirtyFlags()` | Returns `{ alerts, health, cost, crons, sessions, usage, subRuns, subTokens, charts, bottom }` — each boolean |
+| `computeDirtyFlags(snap)` | Returns `{ alerts, health, cost, crons, sessions, usage, subRuns, subTokens, charts, models, skills, git, agentConfig }` — each boolean. Accepts frozen snapshot. |
 
 **Depends on:** `State` (reads `.data`, `.prev`, `.tabs`, `.prevTabs`).
 
-**Migration note:** Move `sectionChanged()`, `stableSnapshot()`, and all the `if (!prevD || ...)` conditionals here. The inline checks in `render()` become calls to `DirtyChecker.computeDirtyFlags()` once at the top of `Renderer.render()`.
+**Migration note:** Move `sectionChanged()`, `stableSnapshot()`, and all the `if (!prevD || ...)` conditionals here. `App` calls `DirtyChecker.computeDirtyFlags(snap)` and passes the result into `Renderer.render(snap, dirtyFlags)` — the Renderer never computes dirty flags itself.
 
 ### 4. `Renderer` — All DOM Updates (~500 lines)
 
@@ -110,7 +112,7 @@ Timer tick / manual refresh
 **Top-level method:**
 | Method | Description |
 |--------|-------------|
-| `render(dirtyFlags)` | Dispatches to section renderers based on flags |
+| `render(snap, dirtyFlags)` | Dispatches to section renderers based on flags. Receives frozen snapshot and pre-computed dirty flags from `App`. |
 
 **Section renderers** (one function each):
 | Function | DOM targets | Dirty flag |
@@ -125,9 +127,12 @@ Timer tick / manual refresh
 | `renderSubRuns()` | `#srBody`, `#subCostLbl`, `#srEmpty` + tab buttons | `subRuns` |
 | `renderSubTokens()` | `#stBody` + tab buttons | `subTokens` |
 | `renderCharts()` | `#costChart`, `#modelChart`, `#subagentChart` + tab buttons | `charts` |
-| `renderBottom()` | `#modelsGrid`, `#skillsGrid`, `#gitPanel`, all agent config panels | `bottom` |
+| `renderModels()` | `#modelsGrid` | `models` |
+| `renderSkills()` | `#skillsGrid` | `skills` |
+| `renderGit()` | `#gitPanel` | `git` |
+| `renderAgentConfig()` | all agent config panels | `agentConfig` |
 
-**Sub-renderers within `renderBottom()`:**
+**Sub-renderers within `renderAgentConfig()`:**
 - `renderAgentCards()`
 - `renderModelRouting()`
 - `renderRuntimeConfig()`
@@ -174,7 +179,18 @@ Timer tick / manual refresh
 |--------|-------------|
 | `init()` | Called on load. Starts theme, first fetch, timer |
 | `refresh()` | Manual refresh (button click) |
+| `renderNow()` | Captures snapshot, computes dirty flags, schedules render via rAF |
 | `onTick()` | Decrement countdown, trigger fetch at 0 |
+
+**`renderNow()` implementation:**
+```js
+renderNow() {
+  const snap = State.snapshot();
+  const flags = DirtyChecker.computeDirtyFlags(snap);
+  requestAnimationFrame(() => Renderer.render(snap, flags));
+  State.commitPrev();
+}
+```
 
 **Depends on:** All other modules.
 
@@ -196,11 +212,11 @@ Keep these as plain top-level functions (they're used everywhere):
 
 **Current:** `onclick="uTab='today';render()"` — references globals.
 
-**After:** Expose a thin `UI` namespace on `window` for HTML bindings:
+**After:** Expose a thin `OCUI` namespace on `window` for HTML bindings:
 
 ```js
 // At the end of <script>, expose for inline handlers
-window.UI = {
+window.OCUI = {
   setUsageTab:    v => { State.setTab('usage', v); App.renderNow(); },
   setSubRunsTab:  v => { State.setTab('subRuns', v); App.renderNow(); },
   setSubTokensTab:v => { State.setTab('subTokens', v); App.renderNow(); },
@@ -211,7 +227,7 @@ window.UI = {
 };
 ```
 
-HTML becomes: `onclick="UI.setUsageTab('today')"` — clean, traceable, no globals.
+HTML becomes: `onclick="OCUI.setUsageTab('today')"` — clean, traceable, no globals.
 
 ---
 
@@ -228,15 +244,31 @@ HTML becomes: `onclick="UI.setUsageTab('today')"` — clean, traceable, no globa
 4. **Create `Renderer` object.** Split the monolithic `render()` into section functions. Each section function should:
    - Accept no arguments (reads from `State` directly)
    - Only be called when its dirty flag is true (except always-update sections like header/health)
-   - The main `Renderer.render()` calls `DirtyChecker.computeDirtyFlags()` then dispatches
+   - `Renderer.render(snap, dirtyFlags)` receives pre-computed flags from `App.renderNow()` and dispatches
 
 5. **Create `Theme` object.** Rename `THEMES` → `Theme.themes`, `currentTheme` → `Theme.current`. Move `loadThemes()`, `applyTheme()`, `renderThemeMenu()`, `toggleThemeMenu()`.
 
 6. **Create `App` object.** Wire `init()` to call `Theme.load()`, `DataLayer.fetch()`, start `setInterval`. Wire `refresh()` for button.
 
-7. **Create `window.UI` namespace.** Update all inline `onclick` handlers in HTML.
+7. **Create `window.OCUI` namespace.** Update all inline `onclick` handlers in HTML.
 
 8. **Delete all loose globals** — nothing should remain outside the module objects except utilities (`$`, `esc`, `safeColor`, `relTime`, `COLORS`).
+
+---
+
+## Non-Functional Guarantees
+
+### Scroll Preservation
+`renderCrons()` and `renderSessions()` save/restore `scrollTop` before/after `innerHTML` replacement using `closest('[style*="overflow"]')` container detection.
+
+### requestAnimationFrame Batching
+All renders triggered by `App.renderNow()` (auto-refresh path) are wrapped in `requestAnimationFrame`. Tab changes and manual refresh call `App.renderNow()` which also uses rAF.
+
+### Error Handling
+If `DataLayer.fetch()` fails: `State.data` is NOT updated (stale data stays displayed). `App` catches the error, logs it, and resets the countdown without calling `Renderer.render()`. Future: add visual stale-data indicator.
+
+### Out-of-Order Fetch Protection
+If two fetches race (manual refresh + timer overlap), the second fetch result is discarded if a newer fetch is already in flight. Use a `DataLayer._reqId` counter: increment on each fetch, ignore responses where `reqId !== DataLayer._reqId`.
 
 ### Renames:
 | Old | New |
@@ -272,7 +304,7 @@ HTML becomes: `onclick="UI.setUsageTab('today')"` — clean, traceable, no globa
 | `Theme` | ~80 |
 | `Renderer` (all sections) | ~480 |
 | `App` | ~35 |
-| `window.UI` | ~15 |
+| `window.OCUI` | ~15 |
 | **Total JS** | **~745** |
 | CSS (unchanged) | ~250 |
 | HTML (unchanged) | ~200 |
