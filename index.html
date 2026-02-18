@@ -515,11 +515,11 @@ function renderThemeMenu(){
   const lightThemes=Object.entries(THEMES).filter(([,t])=>t.type==='light');
   let html='<div class="theme-menu-label">Dark Themes</div>';
   darkThemes.forEach(([id,t])=>{
-    html+=`<button class="theme-opt${esc(id)===currentTheme?' active':''}" onclick="applyTheme('${esc(id)}');event.stopPropagation()"><span class="theme-opt-icon">${esc(t.icon)}</span><span>${esc(t.name)}</span><span class="theme-opt-swatch" style="background:${esc(t.colors.accent)};margin-left:auto"></span></button>`;
+    html+=`<button class="theme-opt${id===currentTheme?' active':''}" onclick="applyTheme('${esc(id)}');event.stopPropagation()"><span class="theme-opt-icon">${esc(t.icon)}</span><span>${esc(t.name)}</span><span class="theme-opt-swatch" style="background:${safeColor(t.colors.accent)};margin-left:auto"></span></button>`;
   });
   html+='<div class="theme-menu-label" style="margin-top:4px">Light Themes</div>';
   lightThemes.forEach(([id,t])=>{
-    html+=`<button class="theme-opt${esc(id)===currentTheme?' active':''}" onclick="applyTheme('${esc(id)}');event.stopPropagation()"><span class="theme-opt-icon">${esc(t.icon)}</span><span>${esc(t.name)}</span><span class="theme-opt-swatch" style="background:${esc(t.colors.accent)};margin-left:auto"></span></button>`;
+    html+=`<button class="theme-opt${id===currentTheme?' active':''}" onclick="applyTheme('${esc(id)}');event.stopPropagation()"><span class="theme-opt-icon">${esc(t.icon)}</span><span>${esc(t.name)}</span><span class="theme-opt-swatch" style="background:${safeColor(t.colors.accent)};margin-left:auto"></span></button>`;
   });
   menu.innerHTML=html;
 }
@@ -540,6 +540,9 @@ let D={},uTab='today',srTab='today',stTab='today',timer=60;
 const COLORS=['#6366f1','#9333ea','#ec4899','#f59e0b','#10b981','#06b6d4','#f87171','#84cc16'];
 const $=id=>document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+function safeColor(v){
+  return /^#[0-9a-fA-F]{3,8}$/.test(v||'') ? v : '#888888';
+}
 
 function relTime(ts){
   if(!ts)return'—';

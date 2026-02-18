@@ -67,7 +67,7 @@ gateway = {"status": "offline", "pid": None, "uptime": "", "memory": "", "rss": 
 try:
     result = subprocess.run(["pgrep", "-f", "openclaw-gateway"],
                           capture_output=True, text=True)
-    pids = result.stdout.strip().split('\n')
+    pids = [p for p in result.stdout.strip().split('\n') if p and p != str(os.getpid())]
     if pids and pids[0]:
         pid = pids[0]
         gateway["pid"] = int(pid)
