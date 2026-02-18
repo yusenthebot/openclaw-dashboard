@@ -417,6 +417,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
       <div id="gatewayPanelInner"></div>
     </div>
 
+    <!-- Subagent Limits -->
+    <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="subagentLimitsCell">
+      <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🕸️ Subagent Limits</div>
+      <div id="subagentConfigPanel"></div>
+    </div>
+
     <!-- Hooks -->
     <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="hooksPanel">
       <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🪝 Internal Hooks</div>
@@ -452,13 +458,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
     <tbody id="agentTableBody"></tbody>
   </table>
 
-  <!-- Subagent Limits -->
-  <div style="margin-top:18px">
-    <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px;max-width:260px">
-      <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🕸️ Subagent Limits</div>
-      <div id="subagentConfigPanel"></div>
-    </div>
-  </div>
+  <!-- subagentConfigPanel moved to extraConfigRow grid -->
 </div>
 
 <div style="text-align:center;padding:12px;font-size:10px;color:var(--darker)">OpenClaw Dashboard · Auto-refresh 60s</div>
