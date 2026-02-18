@@ -361,6 +361,28 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
   </div>
 </div>
 
+<!-- 11. Agent Configuration -->
+<div class="glass panel" style="margin-top:16px">
+  <div class="section-header">
+    <span class="section-title">⚙️ Agent Configuration</span>
+  </div>
+  <div id="agentConfigPanel">
+    <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:14px" id="agentModelSummary"></div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px" id="agentTable">
+      <thead>
+        <tr style="color:var(--muted);text-transform:uppercase;font-size:10px;letter-spacing:.06em">
+          <th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Agent</th>
+          <th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Role</th>
+          <th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Model</th>
+          <th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Model ID</th>
+          <th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Workspace</th>
+        </tr>
+      </thead>
+      <tbody id="agentTableBody"></tbody>
+    </table>
+  </div>
+</div>
+
 <div style="text-align:center;padding:12px;font-size:10px;color:var(--darker)">OpenClaw Dashboard · Auto-refresh 60s</div>
 </div>
 
@@ -558,6 +580,27 @@ function render(){
 
   // Models
   $('modelsGrid').innerHTML=(D.availableModels||[]).map(m=>`<div class="glass model-card"><span class="badge badge-${m.status}">${m.status}</span><div class="model-name">${esc(m.name)}</div><div class="model-id">${esc(m.provider)}</div></div>`).join('');
+
+  // Agent Configuration
+  const AC = D.agentConfig||{};
+  const summaryItems = [
+    {label:'Primary Model', value: AC.primaryModel||'—', color:'var(--green)'},
+    {label:'Image Model',   value: AC.imageModel||'—',   color:'var(--purple)'},
+    {label:'Fallbacks',     value: (AC.fallbacks||[]).join(', ')||'—', color:'var(--blue)'},
+  ];
+  $('agentModelSummary').innerHTML = summaryItems.map(s=>`
+    <div style="background:var(--glass);border:1px solid var(--border);border-radius:6px;padding:8px 12px;min-width:160px">
+      <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px">${esc(s.label)}</div>
+      <div style="font-size:12px;font-weight:600;color:${s.color}">${esc(s.value)}</div>
+    </div>`).join('');
+  $('agentTableBody').innerHTML = (AC.agents||[]).map(a=>`
+    <tr class="dr">
+      <td style="padding:5px 8px;font-weight:600;color:var(--textStrong)">${esc(a.id)}${a.isDefault?' <span style="font-size:9px;color:var(--green);font-weight:400">(default)</span>':''}</td>
+      <td style="padding:5px 8px;color:var(--text)">${esc(a.role)}</td>
+      <td style="padding:5px 8px;color:var(--blue);font-weight:500">${esc(a.model)}</td>
+      <td style="padding:5px 8px;color:var(--dim);font-size:10px;font-family:monospace">${esc(a.modelId)}</td>
+      <td style="padding:5px 8px;color:var(--dim);font-size:10px;font-family:monospace">${esc(a.workspace)}</td>
+    </tr>`).join('')||'<tr><td colspan="5" style="padding:8px;color:var(--dim)">No agents configured</td></tr>';
 
   // Skills
   $('skillsGrid').innerHTML=(D.skills||[]).map(s=>{

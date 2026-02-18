@@ -95,6 +95,9 @@ if os.path.exists(config_path):
             skills.append({'name': name, 'active': enabled, 'type': 'builtin'})
         # Models
         primary = oc.get('agents', {}).get('defaults', {}).get('model', {}).get('primary', '')
+        fallbacks = oc.get('agents', {}).get('defaults', {}).get('model', {}).get('fallbacks', [])
+        image_model = oc.get('agents', {}).get('defaults', {}).get('imageModel', {}).get('primary', '')
+        model_aliases = {mid: mconf.get('alias', mid) for mid, mconf in oc.get('agents', {}).get('defaults', {}).get('models', {}).items()}
         for mid, mconf in oc.get('agents', {}).get('defaults', {}).get('models', {}).items():
             provider = mid.split('/')[0] if '/' in mid else 'unknown'
             available_models.append({
@@ -102,6 +105,27 @@ if os.path.exists(config_path):
                 'name': mconf.get('alias', mid),
                 'id': mid,
                 'status': 'active' if mid == primary else 'available'
+            })
+        # Agent config
+        agent_list = oc.get('agents', {}).get('list', [])
+        agent_config = {
+            'primaryModel': model_aliases.get(primary, primary),
+            'primaryModelId': primary,
+            'imageModel': model_aliases.get(image_model, image_model),
+            'imageModelId': image_model,
+            'fallbacks': [model_aliases.get(f, f) for f in fallbacks[:3]],
+            'agents': []
+        }
+        for ag in agent_list:
+            aid = ag.get('id', '')
+            amodel = ag.get('model', primary)
+            agent_config['agents'].append({
+                'id': aid,
+                'role': 'Main (Default)' if ag.get('default') else ('Work' if 'work' in aid else ('Group' if 'group' in aid else aid.title())),
+                'model': model_aliases.get(amodel, amodel),
+                'modelId': amodel,
+                'workspace': ag.get('workspace', '~/.openclaw/workspace'),
+                'isDefault': ag.get('default', False)
             })
     except: pass
 
@@ -530,6 +554,7 @@ output = {
 
     # Models & skills
     'availableModels': available_models,
+    'agentConfig': agent_config,
     'skills': skills,
 
     # Git log
