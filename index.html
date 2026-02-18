@@ -515,11 +515,11 @@ function renderThemeMenu(){
   const lightThemes=Object.entries(THEMES).filter(([,t])=>t.type==='light');
   let html='<div class="theme-menu-label">Dark Themes</div>';
   darkThemes.forEach(([id,t])=>{
-    html+=`<button class="theme-opt${id===currentTheme?' active':''}" onclick="applyTheme('${id}');event.stopPropagation()"><span class="theme-opt-icon">${t.icon}</span><span>${t.name}</span><span class="theme-opt-swatch" style="background:${t.colors.accent};margin-left:auto"></span></button>`;
+    html+=`<button class="theme-opt${esc(id)===currentTheme?' active':''}" onclick="applyTheme('${esc(id)}');event.stopPropagation()"><span class="theme-opt-icon">${esc(t.icon)}</span><span>${esc(t.name)}</span><span class="theme-opt-swatch" style="background:${esc(t.colors.accent)};margin-left:auto"></span></button>`;
   });
   html+='<div class="theme-menu-label" style="margin-top:4px">Light Themes</div>';
   lightThemes.forEach(([id,t])=>{
-    html+=`<button class="theme-opt${id===currentTheme?' active':''}" onclick="applyTheme('${id}');event.stopPropagation()"><span class="theme-opt-icon">${t.icon}</span><span>${t.name}</span><span class="theme-opt-swatch" style="background:${t.colors.accent};margin-left:auto"></span></button>`;
+    html+=`<button class="theme-opt${esc(id)===currentTheme?' active':''}" onclick="applyTheme('${esc(id)}');event.stopPropagation()"><span class="theme-opt-icon">${esc(t.icon)}</span><span>${esc(t.name)}</span><span class="theme-opt-swatch" style="background:${esc(t.colors.accent)};margin-left:auto"></span></button>`;
   });
   menu.innerHTML=html;
 }
@@ -578,7 +578,7 @@ function render(){
 
   // Alerts
   const alerts=D.alerts||[];
-  $('alertsSection').innerHTML=alerts.length?alerts.map(a=>`<div class="alert-item alert-${a.severity||'low'}"><span class="alert-icon">${a.icon||'ℹ️'}</span><span class="alert-msg">${esc(a.message)}</span></div>`).join(''):'';
+  $('alertsSection').innerHTML=alerts.length?alerts.map(a=>`<div class="alert-item alert-${esc(a.severity)||'low'}"><span class="alert-icon">${esc(a.icon)||'ℹ️'}</span><span class="alert-msg">${esc(a.message)}</span></div>`).join(''):'';
 
   // Health
   $('hGw').innerHTML=on?'<span style="color:var(--green)">●</span> Online':'<span style="color:var(--red)">●</span> Offline';
@@ -619,7 +619,7 @@ function render(){
     const dotCls=st==='ok'?'sd-ok':st==='error'?'sd-error':st==='none'?'sd-none':'sd-pending';
     const tip=c.lastError?` data-tip="${esc(c.lastError)}"`:'';
     const dur=c.lastDurationMs?((c.lastDurationMs/1000).toFixed(1)+'s'):'—';
-    return `<tr class="dr"><td><span class="sd ${dotCls}"${tip}></span>${st||'—'}</td><td class="w">${esc(c.name)}</td><td>${esc(c.schedule)}</td><td>${esc(c.lastRun||'—')}</td><td>${esc(c.nextRun||'—')}</td><td class="r">${dur}</td><td>${esc(c.model||'—')}</td></tr>`;
+    return `<tr class="dr"><td><span class="sd ${dotCls}"${tip}></span>${esc(st)||'—'}</td><td class="w">${esc(c.name)}</td><td>${esc(c.schedule)}</td><td>${esc(c.lastRun||'—')}</td><td>${esc(c.nextRun||'—')}</td><td class="r">${dur}</td><td>${esc(c.model||'—')}</td></tr>`;
   }).join('');
 
   // Sessions
@@ -947,10 +947,10 @@ function renderCostChart(id,data){
   let pts=data.map((d,i)=>[P.l+i*stepX,P.t+ch-(d.total/maxY)*ch]);
   const line=pts.map((p,i)=>(i?'L':'M')+p[0]+','+p[1]).join(' ');
   const area=line+` L${pts[pts.length-1][0]},${P.t+ch} L${pts[0][0]},${P.t+ch} Z`;
-  const dots=pts.map((p,i)=>`<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="var(--accent)"><title>${data[i].label}: $${data[i].total.toFixed(2)}</title></circle>`).join('');
+  const dots=pts.map((p,i)=>`<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="var(--accent)"><title>${esc(data[i].label)}: $${data[i].total.toFixed(2)}</title></circle>`).join('');
   const yLabels=Array.from({length:5},(_, i)=>{const v=maxY*i/4;const y=P.t+ch-ch*i/4;return `<text x="${P.l-6}" y="${y+3}" text-anchor="end" fill="var(--dim)" font-size="9">$${v.toFixed(0)}</text><line x1="${P.l}" y1="${y}" x2="${W-P.r}" y2="${y}" stroke="var(--border)" stroke-dasharray="2"/>`}).join('');
   const nth=Math.ceil(data.length/7);
-  const xLabels=data.map((d,i)=>i%nth===0?`<text x="${P.l+i*stepX}" y="${H-P.b+16}" text-anchor="middle" fill="var(--dim)" font-size="9">${d.label}</text>`:'').join('');
+  const xLabels=data.map((d,i)=>i%nth===0?`<text x="${P.l+i*stepX}" y="${H-P.b+16}" text-anchor="middle" fill="var(--dim)" font-size="9">${esc(d.label)}</text>`:'').join('');
   $(id).innerHTML=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:350px">${yLabels}${xLabels}<path d="${area}" fill="var(--accent)" opacity="0.15"/><path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2"/>${dots}</svg>`;
 }
 
@@ -966,13 +966,13 @@ function renderModelChart(id,data){
     let cum=0;const x=P.l+i*(barW+gap)+gap/2;
     mList.forEach((m,mi)=>{
       const v=(d.models||{})[m]||0;const h=(v/maxY)*ch;
-      bars+=`<rect x="${x}" y="${P.t+ch-cum-h}" width="${barW}" height="${h}" fill="${COLORS[mi%COLORS.length]}"><title>${d.label} ${m}: $${v.toFixed(2)}</title></rect>`;
+      bars+=`<rect x="${x}" y="${P.t+ch-cum-h}" width="${barW}" height="${h}" fill="${COLORS[mi%COLORS.length]}"><title>${esc(d.label)} ${esc(m)}: $${v.toFixed(2)}</title></rect>`;
       cum+=h;
     });
   });
   const yLabels=Array.from({length:5},(_,i)=>{const v=maxY*i/4;const y=P.t+ch-ch*i/4;return `<text x="${P.l-6}" y="${y+3}" text-anchor="end" fill="var(--dim)" font-size="9">$${v.toFixed(0)}</text><line x1="${P.l}" y1="${y}" x2="${W-P.r}" y2="${y}" stroke="var(--border)" stroke-dasharray="2"/>`}).join('');
   const nth=Math.ceil(data.length/7);
-  const xLabels=data.map((d,i)=>i%nth===0?`<text x="${P.l+i*(barW+gap)+gap/2+barW/2}" y="${H-P.b+16}" text-anchor="middle" fill="var(--dim)" font-size="9">${d.label}</text>`:'').join('');
+  const xLabels=data.map((d,i)=>i%nth===0?`<text x="${P.l+i*(barW+gap)+gap/2+barW/2}" y="${H-P.b+16}" text-anchor="middle" fill="var(--dim)" font-size="9">${esc(d.label)}</text>`:'').join('');
   const legend=mList.map((m,i)=>`<span class="chart-legend-item"><span class="chart-legend-dot" style="background:${COLORS[i%COLORS.length]}"></span>${esc(m)}</span>`).join('');
   $(id).innerHTML=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:310px">${yLabels}${xLabels}${bars}</svg><div class="chart-legend">${legend}</div>`;
 }
@@ -987,15 +987,15 @@ function renderSubagentChart(id,data){
   data.forEach((d,i)=>{
     const x=P.l+i*(barW+gap)+gap/2;
     const h=((d.subagentRuns||0)/maxRuns)*ch;
-    bars+=`<rect x="${x}" y="${P.t+ch-h}" width="${barW}" height="${h}" fill="var(--purple)" opacity="0.6"><title>${d.label}: ${d.subagentRuns||0} runs</title></rect>`;
+    bars+=`<rect x="${x}" y="${P.t+ch-h}" width="${barW}" height="${h}" fill="var(--purple)" opacity="0.6"><title>${esc(d.label)}: ${d.subagentRuns||0} runs</title></rect>`;
     pts.push([x+barW/2,P.t+ch-((d.subagentCost||0)/maxCost)*ch]);
   });
   const line=pts.map((p,i)=>(i?'L':'M')+p[0]+','+p[1]).join(' ');
-  const dots=pts.map((p,i)=>`<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="var(--accent)"><title>${data[i].label}: $${(data[i].subagentCost||0).toFixed(2)}</title></circle>`).join('');
+  const dots=pts.map((p,i)=>`<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="var(--accent)"><title>${esc(data[i].label)}: $${(data[i].subagentCost||0).toFixed(2)}</title></circle>`).join('');
   const yL=Array.from({length:5},(_,i)=>{const v=maxRuns*i/4;const y=P.t+ch-ch*i/4;return `<text x="${P.l-6}" y="${y+3}" text-anchor="end" fill="var(--dim)" font-size="9">${Math.round(v)}</text><line x1="${P.l}" y1="${y}" x2="${W-P.r}" y2="${y}" stroke="var(--border)" stroke-dasharray="2"/>`}).join('');
   const yR=Array.from({length:5},(_,i)=>{const v=maxCost*i/4;const y=P.t+ch-ch*i/4;return `<text x="${W-P.r+6}" y="${y+3}" text-anchor="start" fill="var(--accent)" font-size="9">$${v.toFixed(0)}</text>`}).join('');
   const nth=Math.ceil(data.length/7);
-  const xLabels=data.map((d,i)=>i%nth===0?`<text x="${P.l+i*(barW+gap)+gap/2+barW/2}" y="${H-P.b+16}" text-anchor="middle" fill="var(--dim)" font-size="9">${d.label}</text>`:'').join('');
+  const xLabels=data.map((d,i)=>i%nth===0?`<text x="${P.l+i*(barW+gap)+gap/2+barW/2}" y="${H-P.b+16}" text-anchor="middle" fill="var(--dim)" font-size="9">${esc(d.label)}</text>`:'').join('');
   $(id).innerHTML=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:350px">${yL}${yR}${xLabels}${bars}<path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2"/>${dots}</svg><div class="chart-legend"><span class="chart-legend-item"><span class="chart-legend-dot" style="background:var(--purple)"></span>Runs</span><span class="chart-legend-item"><span class="chart-legend-dot" style="background:var(--accent)"></span>Cost</span></div>`;
 }
 

@@ -2,7 +2,7 @@
 # OpenClaw Dashboard — Data Refresh Script
 # Generates data.json with all dashboard data
 
-set -e
+set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 OPENCLAW_PATH="${OPENCLAW_HOME:-$HOME/.openclaw}"
@@ -22,7 +22,7 @@ if [ -z "$PYTHON" ]; then
   exit 1
 fi
 
-$PYTHON - "$DIR" "$OPENCLAW_PATH" << 'PYEOF' > "$DIR/data.json.tmp"
+"$PYTHON" - "$DIR" "$OPENCLAW_PATH" << 'PYEOF' > "$DIR/data.json.tmp"
 import json, glob, os, sys, subprocess, time
 import re as _re
 from collections import defaultdict
@@ -45,7 +45,8 @@ bot_emoji = "⚡"
 dc_path = os.path.join(dashboard_dir, "config.json")
 if os.path.exists(dc_path):
     try:
-        dc = json.load(open(dc_path))
+        with open(dc_path) as _f:
+            dc = json.load(_f)
         bot_name = dc.get('bot', {}).get('name', bot_name)
         bot_emoji = dc.get('bot', {}).get('emoji', bot_emoji)
     except Exception as _e:
@@ -64,8 +65,8 @@ MEMORY_THRESHOLD_KB = alert_cfg.get('memoryMb', 640) * 1024
 # ── Gateway health ──
 gateway = {"status": "offline", "pid": None, "uptime": "", "memory": "", "rss": 0}
 try:
-    result = subprocess.run("ps aux | grep 'openclaw-gateway' | grep -v grep | awk '{print $2}'",
-                          shell=True, capture_output=True, text=True)
+    result = subprocess.run(["pgrep", "-f", "openclaw-gateway"],
+                          capture_output=True, text=True)
     pids = result.stdout.strip().split('\n')
     if pids and pids[0]:
         pid = pids[0]
@@ -136,7 +137,8 @@ if os.path.exists(config_path):
         group_names = {}
         for store_file2 in glob.glob(os.path.join(base, '*/sessions/sessions.json')):
             try:
-                store2 = json.load(open(store_file2))
+                with open(store_file2) as _f:
+                    store2 = json.load(_f)
                 for key2, val2 in store2.items():
                     if 'group:' not in key2 or 'topic' in key2 or 'run:' in key2 or 'subagent' in key2: continue
                     gid2 = key2.split('group:')[-1].split(':')[0]
@@ -241,7 +243,8 @@ known_sids = {}
 sessions_list = []
 for store_file in glob.glob(os.path.join(base, '*/sessions/sessions.json')):
     try:
-        store = json.load(open(store_file))
+        with open(store_file) as _f:
+            store = json.load(_f)
         agent_name = store_file.split('/agents/')[1].split('/')[0]
         for key, val in store.items():
             sid = val.get('sessionId', '')
@@ -311,7 +314,8 @@ sessions_list = sessions_list[:20]  # Top 20 most recent
 crons = []
 if os.path.exists(cron_path):
     try:
-        jobs = json.load(open(cron_path)).get('jobs', [])
+        with open(cron_path) as _f:
+            jobs = json.load(_f).get('jobs', [])
         for job in jobs:
             sched = job.get('schedule', {})
             kind = sched.get('kind', '')
@@ -409,20 +413,22 @@ date_30d = (now - timedelta(days=30)).strftime('%Y-%m-%d')
 # Sub-agent activity tracking
 subagent_runs = []
 
+# Build sessionId -> session key map once (avoid re-reading sessions.json per JSONL file)
+sid_to_key = {}
+for store_file in glob.glob(os.path.join(base, '*/sessions/sessions.json')):
+    try:
+        with open(store_file) as _f:
+            store = json.load(_f)
+        for k, v in store.items():
+            sidv = v.get('sessionId')
+            if sidv and sidv not in sid_to_key:
+                sid_to_key[sidv] = k
+    except Exception as _e:
+        import sys; print(f"[dashboard warn] {_e}", file=sys.stderr)
+
 for f in glob.glob(os.path.join(base, '*/sessions/*.jsonl')) + glob.glob(os.path.join(base, '*/sessions/*.jsonl.deleted.*')):
     sid = os.path.basename(f).replace('.jsonl', '')
-    session_key = None
-    # Find session key for this sid
-    for store_file in glob.glob(os.path.join(base, '*/sessions/sessions.json')):
-        try:
-            store = json.load(open(store_file))
-            for k, v in store.items():
-                if v.get('sessionId') == sid:
-                    session_key = k
-                    break
-        except Exception as _e:
-            import sys; print(f"[dashboard warn] {_e}", file=sys.stderr)
-        if session_key: break
+    session_key = sid_to_key.get(sid)
     is_subagent = 'subagent:' in (session_key or '') or sid not in known_sids
 
     session_cost = 0
