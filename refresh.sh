@@ -247,7 +247,9 @@ for store_file in glob.glob(os.path.join(base, '*/sessions/sessions.json')):
                     'lastActivity': updated_str,
                     'updatedAt': updated,
                     'totalTokens': total_tokens,
-                    'type': stype
+                    'type': stype,
+                    'spawnedBy': val.get('spawnedBy', ''),
+                    'active': age_min < 30
                 })
     except: pass
 
