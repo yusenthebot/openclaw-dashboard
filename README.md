@@ -276,6 +276,20 @@ rm -rf ~/.openclaw/dashboard
 
 ## Changelog
 
+### v2026.2.19
+
+- **New**: Section dirty-checking — `prevD` snapshot + `sectionChanged()` skips unchanged DOM sections on every refresh
+- **New**: `requestAnimationFrame` batching for render calls
+- **New**: Scroll position preservation for cron and session tables
+- **Fixed**: Tab switching (7d/30d/today) correctly triggers re-render after dirty-check introduction
+- **Fixed**: Cross-tab dirty-check contamination between token usage and sub-token sections
+- **Fixed**: Invalid `chartDays` key in `sectionChanged()`, `t.colors` null guard in theme menu
+- **New**: Full ATDD test suite — 44 acceptance criteria across 4 test files
+- **New**: `ARCHITECTURE.md` — clean module design for future refactor
+- **New**: `TODO.md` — backlog with version plan
+- **New**: GitHub link + version badge in header
+- **New**: "Why This Exists" section in README
+
 ### v2026.2.18
 
 - **New**: 🌳 Agent Hierarchy Tree in Active Sessions — 3-level CSS indented cards showing parent→child agent relationships
