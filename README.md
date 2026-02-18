@@ -276,7 +276,7 @@ rm -rf ~/.openclaw/dashboard
 
 ## Changelog
 
-### v2.6.0
+### v2026.2.18
 
 - **New**: 🌳 Agent Hierarchy Tree in Active Sessions — 3-level CSS indented cards showing parent→child agent relationships
 - **New**: Sub-agent Routing section in Model Routing panel
@@ -286,7 +286,7 @@ rm -rf ~/.openclaw/dashboard
 - **Improved**: Font size consistency fixes across Agent Config section
 - **Improved**: Runtime Config channel rows compact layout
 
-### v2.5.0
+### v2026.2.17
 
 - **New**: 📈 Charts & Trends section — 3 always-visible pure SVG charts (cost trend, model breakdown, sub-agent activity)
 - **New**: 7d/30d time filter tabs on Token Usage, Sub-Agent Activity, and Sub-Agent Token Breakdown panels
@@ -295,7 +295,7 @@ rm -rf ~/.openclaw/dashboard
 - **New**: `models_7d`, `models_30d`, `subagent_7d`, `subagent_30d` data buckets
 - **Improved**: `refresh.sh` now collects 35 data keys for richer time-series analysis
 
-### v2.4.0
+### v2026.2.16
 
 - **New**: 🎨 Multi-theme support — 6 built-in themes (3 dark + 3 light)
 - **New**: Theme switcher in header bar — instant CSS variable swap, no reload needed
@@ -304,7 +304,7 @@ rm -rf ~/.openclaw/dashboard
 - **New**: `TECHNICAL.md` — comprehensive developer documentation (architecture, data pipeline, schema, security)
 - **Improved**: Replaced ~20 hardcoded color values with CSS custom properties for full theme support
 
-### v2.3.0
+### v2026.2.15
 
 - **New**: `--bind` / `-b` flag for LAN access (`--bind 0.0.0.0`)
 - **New**: `--port` / `-p` flag for custom port
@@ -316,7 +316,7 @@ rm -rf ~/.openclaw/dashboard
 - **Improved**: Config priority chain: CLI flags > env vars > config.json > defaults
 - **Improved**: `--help` with usage examples
 
-### v2.0.0
+### v2026.2.8
 
 - **New**: Complete UI redesign with glass morphism dark theme
 - **New**: `server.py` with on-demand `/api/refresh` endpoint (replaces `python3 -m http.server`)
@@ -333,7 +333,7 @@ rm -rf ~/.openclaw/dashboard
 - **Improved**: `refresh.sh` auto-discovers all sessions, crons, models, skills
 - **Improved**: Responsive layout for mobile/tablet
 
-### v1.0.0
+### v2026.2.6
 
 - Initial release with basic token usage and cron panels
 
