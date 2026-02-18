@@ -803,7 +803,7 @@ function render(){
 function renderAgentTree(){
   const svg=document.getElementById('agentMindMap');
   if(!svg)return;
-  const sessions=(D.sessions||[]);
+  const sessions=(D.sessions||[]).filter(s=>s.active);
   if(!sessions.length){svg.innerHTML='<text x="450" y="150" text-anchor="middle" fill="var(--dim)" font-size="13">No active sessions</text>';return;}
   const cs=getComputedStyle(document.documentElement);
   const cGreen=cs.getPropertyValue('--green').trim()||'#4ade80';
