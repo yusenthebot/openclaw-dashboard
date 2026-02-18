@@ -437,7 +437,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
 
   <!-- Full Agent Table -->
   <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">📋 Agent Details</div>
-  <table style="width:100%;border-collapse:collapse;font-size:11px" id="agentTable">
+  <table style="width:100%;border-collapse:collapse;font-size:12px" id="agentTable">
     <thead>
       <tr style="color:var(--muted);text-transform:uppercase;font-size:9px;letter-spacing:.08em">
         <th style="text-align:left;padding:5px 8px;border-bottom:1px solid var(--border)">Agent ID</th>
@@ -445,6 +445,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
         <th style="text-align:left;padding:5px 8px;border-bottom:1px solid var(--border)">Model</th>
         <th style="text-align:left;padding:5px 8px;border-bottom:1px solid var(--border)">Provider</th>
         <th style="text-align:left;padding:5px 8px;border-bottom:1px solid var(--border)">Workspace</th>
+        <th style="text-align:left;padding:5px 8px;border-bottom:1px solid var(--border)">Fallbacks</th>
         <th style="text-align:left;padding:5px 8px;border-bottom:1px solid var(--border)">Context 1M</th>
       </tr>
     </thead>
@@ -673,10 +674,10 @@ function render(){
         ${a.isDefault?'<span style="font-size:9px;background:rgba(74,222,128,.15);color:var(--green);border:1px solid rgba(74,222,128,.3);border-radius:4px;padding:1px 5px">DEFAULT</span>':''}
       </div>
       <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Role</div>
-      <div style="font-size:11px;color:${col};font-weight:600;margin-bottom:8px">${esc(a.role||a.id)}</div>
+      <div style="font-size:13px;color:${col};font-weight:600;margin-bottom:8px">${esc(a.role||a.id)}</div>
       <div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Model</div>
-      <div style="font-size:12px;color:var(--textStrong);font-weight:600;margin-bottom:2px">${esc(a.model||'—')}</div>
-      <div style="font-size:10px;color:var(--dim);font-family:monospace">${esc(provider)}</div>
+      <div style="font-size:13px;color:var(--textStrong);font-weight:600;margin-bottom:2px">${esc(a.model||'—')}</div>
+      <div style="font-size:11px;color:var(--dim);font-family:monospace">${esc(provider)}</div>
     </div>`;
   }).join('') : '<div style="color:var(--dim);font-size:11px;padding:8px">No agents configured — using default model.</div>';
 
@@ -695,14 +696,14 @@ function render(){
       ${routingChain.map((r,i)=>`
         ${i>0?'<div style="color:var(--dim);font-size:12px">→</div>':''}
         <div style="background:${r.bg};border:1px solid ${r.color};border-radius:6px;padding:5px 9px;text-align:center${r.opacity?`;opacity:${r.opacity}`:''}">
-          <div style="font-size:8px;color:var(--muted);margin-bottom:1px">${r.label}</div>
-          <div style="font-size:11px;font-weight:700;color:${r.textCol}">${esc(r.model)}</div>
+          <div style="font-size:9px;color:var(--muted);margin-bottom:1px">${r.label}</div>
+          <div style="font-size:13px;font-weight:700;color:${r.textCol}">${esc(r.model)}</div>
         </div>`).join('')}
     </div>
     ${extraRows.length?`<div style="padding-top:8px;border-top:1px solid var(--border)">${
       extraRows.map(r=>`<div style="display:flex;justify-content:space-between;margin-bottom:4px">
-        <span style="font-size:10px;color:var(--muted)">${esc(r.k)}</span>
-        <span style="font-size:10px;color:${r.c};font-weight:600">${esc(r.v)}</span>
+        <span style="font-size:12px;color:var(--muted)">${esc(r.k)}</span>
+        <span style="font-size:12px;color:${r.c};font-weight:600">${esc(r.v)}</span>
       </div>`).join('')
     }</div>`:''}`.trim();
 
@@ -723,20 +724,20 @@ function render(){
     compCards.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;margin-bottom:${channelRows.length?8:0}px">
       ${compCards.map(r=>`<div style="background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:5px;padding:6px 8px">
         <div style="font-size:9px;color:var(--muted);margin-bottom:2px">${esc(r.k)}</div>
-        <div style="font-size:11px;font-weight:600;color:${r.c}">${esc(r.v)}</div>
+        <div style="font-size:12px;font-weight:600;color:${r.c}">${esc(r.v)}</div>
       </div>`).join('')}
     </div>` : '',
     channelRows.length ? `<div style="${compCards.length?'padding-top:8px;border-top:1px solid var(--border)':''}">
       ${channelRows.map(r=>`<div style="display:flex;justify-content:space-between;margin-bottom:4px">
-        <span style="font-size:10px;color:var(--muted)">${esc(r.k)}</span>
-        <span style="font-size:10px;color:var(--text);font-weight:600">${esc(r.v)}</span>
+        <span style="font-size:12px;color:var(--muted)">${esc(r.k)}</span>
+        <span style="font-size:12px;color:var(--text);font-weight:600">${esc(r.v)}</span>
       </div>`).join('')}
     </div>` : '',
     !compCards.length && !channelRows.length ? '<div style="color:var(--dim);font-size:11px">No runtime config detected.</div>' : ''
   ].join('');
 
   // Helper: key-value row
-  const kv = (k,v,c='var(--text)') => `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:10px;color:var(--muted)">${esc(k)}</span><span style="font-size:10px;color:${c};font-weight:600">${esc(String(v))}</span></div>`;
+  const kv = (k,v,c='var(--text)') => `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:12px;color:var(--muted)">${esc(k)}</span><span style="font-size:12px;color:${c};font-weight:600">${esc(String(v))}</span></div>`;
   const badge = (label,on) => `<span style="display:inline-block;margin:2px 2px;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600;background:${on?'rgba(74,222,128,.12)':'rgba(255,255,255,.05)'};color:${on?'var(--green)':'var(--dim)'};border:1px solid ${on?'rgba(74,222,128,.3)':'var(--border)'}">${esc(label)}</span>`;
 
   // Search Panel
@@ -745,7 +746,7 @@ function render(){
     kv('Provider', SR.provider, 'var(--blue)'),
     kv('Max Results', SR.maxResults),
     kv('Cache TTL', (SR.cacheTtlMinutes||'—')+' min'),
-  ].join('') : '<span style="color:var(--dim);font-size:10px">Not configured</span>';
+  ].join('') : '<span style="color:var(--dim);font-size:12px">Not configured</span>';
 
   // Gateway Panel
   const GW = AC.gateway||{};
@@ -755,13 +756,13 @@ function render(){
     kv('Bind', GW.bind),
     kv('Auth Mode', GW.authMode),
     kv('Tailscale', GW.tailscale),
-  ].join('') : '<span style="color:var(--dim);font-size:10px">Not configured</span>';
+  ].join('') : '<span style="color:var(--dim);font-size:12px">Not configured</span>';
 
   // Hooks Panel
   const hooks = AC.hooks||[];
   $('hooksPanelInner').innerHTML = hooks.length
     ? hooks.map(h=>badge(h.name, h.enabled)).join('')
-    : '<span style="color:var(--dim);font-size:10px">No hooks configured</span>';
+    : '<span style="color:var(--dim);font-size:12px">No hooks configured</span>';
 
   // Plugins & Extras
   const plugins = AC.plugins||[];
@@ -779,13 +780,13 @@ function render(){
   const bindings = AC.bindings||[];
   $('bindingsPanel').innerHTML = bindings.length
     ? `<div style="display:flex;flex-wrap:wrap;gap:8px">${bindings.map(b=>`
-        <div style="background:var(--glass);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:10px">
+        <div style="background:var(--glass);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px">
           <span style="color:var(--muted)">Agent </span><span style="color:var(--blue);font-weight:700">${esc(b.agentId)}</span>
           <span style="color:var(--dim)"> ← ${esc(b.channel)} </span>
           <span style="color:var(--muted)">${esc(b.kind)}</span>
           <span style="color:var(--dim);font-family:monospace;font-size:9px"> ${esc(b.id)}</span>
         </div>`).join('')}</div>`
-    : '<span style="color:var(--dim);font-size:10px">No explicit bindings — all messages go to default agent</span>';
+    : '<span style="color:var(--dim);font-size:12px">No explicit bindings — all messages go to default agent</span>';
 
   // Agent Details Table — generic, uses palette colors by index
   $('agentTableBody').innerHTML = agentList.map((a,i)=>{
@@ -796,11 +797,12 @@ function render(){
       <td style="padding:6px 8px;font-weight:700;color:${col}">${esc(a.id)}${a.isDefault?' <span style="font-size:9px;color:var(--green);font-weight:400">(default)</span>':''}</td>
       <td style="padding:6px 8px;color:var(--text)">${esc(a.role||a.id)}</td>
       <td style="padding:6px 8px;color:var(--textStrong);font-weight:600">${esc(a.model)}</td>
-      <td style="padding:6px 8px;color:var(--dim);font-size:10px">${esc(provider)}</td>
-      <td style="padding:6px 8px;color:var(--dim);font-size:10px;font-family:monospace">${esc(a.workspace)}</td>
+      <td style="padding:6px 8px;color:var(--dim);font-size:12px">${esc(provider)}</td>
+      <td style="padding:6px 8px;color:var(--dim);font-size:12px;font-family:monospace">${esc(a.workspace)}</td>
+      <td style="padding:6px 8px;color:var(--dim);font-size:11px">${esc((AC.fallbacks||[]).join(' → '))}</td>
       <td style="padding:6px 8px;text-align:center">${ctx1m}</td>
     </tr>`;
-  }).join('')||'<tr><td colspan="6" style="padding:8px;color:var(--dim)">No agents configured</td></tr>';
+  }).join('')||'<tr><td colspan="7" style="padding:8px;color:var(--dim)">No agents configured</td></tr>';
 
   // Skills
   $('skillsGrid').innerHTML=(D.skills||[]).map(s=>{
