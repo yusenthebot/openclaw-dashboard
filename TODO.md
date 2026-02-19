@@ -7,7 +7,7 @@
 
 ---
 
-## 🏗️ Architecture Refactor (v2026.2.20)
+## 🏗️ Architecture Refactor (v2026.2.XX)
 
 Clean module structure — single file, zero deps. Opus designed, Codex reviewed.
 See `ARCHITECTURE.md` for full spec.
@@ -21,12 +21,12 @@ Before implementing, apply these design tweaks (from Codex review):
 - [ ] Document non-functional guarantees in ARCHITECTURE.md: scroll preservation, rAF batching, error handling, out-of-order fetch protection
 - [ ] Update ATDD tests AC17–AC20 to new architecture names after refactor (`prevD` → `State.prev`, `loadData` → `App.refresh`, etc.)
 
-## ⚡ Performance (v2026.2.21)
+## ⚡ Performance (v2026.2.XX)
 
 - [ ] Volatile timestamp fix — `stableSnapshot()` for sessions/crons/subagentRuns dirty-checks (exclude `lastRun`, `nextRun`, `timestamp`, `updatedAt`)
 - [ ] DOM/SVG incremental updates — Option B keyed row reconciliation + Option C SVG attr updates (only if refresh < 10s or tables > 100 rows)
 
-## 🐳 Deployment (v2026.2.22)
+## 🐳 Deployment (v2026.2.XX)
 
 - [ ] **Dockerfile** — containerized dashboard: Python slim image, copy `index.html` + `server.py` + `refresh.sh` + `themes.json`, expose port 8080, mount openclaw config as volume
 - [ ] **Nix flake** — `flake.nix` with `devShell` (python3 + bash deps) and `packages.default` for reproducible installs on NixOS / nix-darwin
