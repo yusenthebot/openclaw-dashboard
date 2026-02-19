@@ -88,7 +88,7 @@ except Exception as _e:
 skills = []
 available_models = []
 compaction_mode = "unknown"
-agent_config = {'primaryModel':'','primaryModelId':'','imageModel':'','imageModelId':'','fallbacks':[],'streamMode':'off','telegramDmPolicy':'—','telegramGroups':0,'channels':[],'compaction':{},'agents':[],'search':{},'gateway':{},'hooks':[],'plugins':[],'skills':[],'bindings':[],'crons':[],'tts':False,'diagnostics':False}
+agent_config = {'primaryModel':'','primaryModelId':'','imageModel':'','imageModelId':'','fallbacks':[],'streamMode':'off','telegramDmPolicy':'—','telegramGroups':0,'channels':[],'channelStatus':{},'compaction':{},'agents':[],'search':{},'gateway':{},'hooks':[],'plugins':[],'skills':[],'bindings':[],'crons':[],'tts':False,'diagnostics':False}
 if os.path.exists(config_path):
     try:
         with open(config_path) as cf:
@@ -117,8 +117,36 @@ if os.path.exists(config_path):
         agent_list = oc.get('agents', {}).get('list', [])
         compaction_cfg = defs.get('compaction', {})
         model_params = {mid: mconf.get('params', {}) for mid, mconf in oc.get('agents', {}).get('defaults', {}).get('models', {}).items()}
-        tg_cfg = oc.get('channels', {}).get('telegram', {})
-        channels_enabled = [ch for ch, conf in oc.get('channels', {}).items() if isinstance(conf, dict) and conf.get('enabled', True)]
+        channels_cfg = oc.get('channels', {})
+        tg_cfg = channels_cfg.get('telegram', {})
+        channels_enabled = [ch for ch, conf in channels_cfg.items() if isinstance(conf, dict) and conf.get('enabled', True)]
+        channel_status = {}
+        for ch_name, conf in channels_cfg.items():
+            if not isinstance(conf, dict):
+                continue
+            enabled = bool(conf.get('enabled', True))
+            configured = conf.get('configured')
+            if configured is None:
+                configured = any(k not in ('enabled', 'configured', 'connected', 'health', 'error', 'lastError') for k in conf.keys())
+            health = conf.get('health')
+            connected = conf.get('connected')
+            error = conf.get('error') or conf.get('lastError')
+            if isinstance(health, dict):
+                connected = health.get('connected', connected)
+                error = health.get('error') or health.get('lastError') or error
+            elif isinstance(health, str) and connected is None:
+                health_s = health.lower()
+                if health_s in ('connected', 'ok', 'healthy', 'online'):
+                    connected = True
+                elif health_s in ('disconnected', 'offline', 'error', 'unhealthy'):
+                    connected = False
+            channel_status[ch_name] = {
+                'enabled': enabled,
+                'configured': bool(configured),
+                'connected': connected,
+                'health': health,
+                'error': error,
+            }
         # Search / web tools
         web_cfg = oc.get('tools', {}).get('web', {}).get('search', {})
         # Gateway
@@ -167,6 +195,7 @@ if os.path.exists(config_path):
             'telegramDmPolicy': tg_cfg.get('dmPolicy', '—'),
             'telegramGroups': len(tg_cfg.get('groups', {})),
             'channels': channels_enabled,
+            'channelStatus': channel_status,
             'compaction': {
                 'mode': compaction_cfg.get('mode', 'auto'),
                 'reserveTokensFloor': compaction_cfg.get('reserveTokensFloor', 0),
@@ -309,6 +338,32 @@ for store_file in glob.glob(os.path.join(base, '*/sessions/sessions.json')):
 
 sessions_list.sort(key=lambda x: -x.get('updatedAt', 0))
 sessions_list = sessions_list[:20]  # Top 20 most recent
+
+# Backfill channel connectivity from recent session activity (runtime signal)
+# Session key pattern: agent:<agentId>:<channel>:...
+channel_recent_active = {}
+for s in sessions_list:
+    key = s.get('key', '')
+    if not isinstance(key, str):
+        continue
+    parts = key.split(':')
+    if len(parts) < 4 or parts[0] != 'agent':
+        continue
+    channel = parts[2]
+    # Ignore non-channel pseudo channels
+    if channel in ('main', 'cron', 'subagent', 'run'):
+        continue
+    channel_recent_active[channel] = channel_recent_active.get(channel, False) or bool(s.get('active', False))
+
+# Apply runtime hint only when config does not already provide explicit connected value
+if isinstance(agent_config, dict) and isinstance(agent_config.get('channelStatus'), dict):
+    for ch_name, st in agent_config['channelStatus'].items():
+        if not isinstance(st, dict):
+            continue
+        if st.get('connected') is None and channel_recent_active.get(ch_name):
+            st['connected'] = True
+            if st.get('health') in (None, '', False):
+                st['health'] = 'active'
 
 # ── Cron jobs ──
 crons = []

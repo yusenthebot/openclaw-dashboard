@@ -409,6 +409,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
   <!-- 3-col: Search + Gateway + Capabilities -->
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:18px" id="extraConfigRow">
 
+    <!-- Channels -->
+    <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="channelsPanel">
+      <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">📡 Channels</div>
+      <div id="channelConfigPanel"></div>
+    </div>
+
     <!-- Search -->
     <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="searchPanel">
       <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🔍 Web Search</div>
@@ -789,30 +795,73 @@ function render(){
       comp.memoryFlush!=null         ? {k:'Memory Flush',     v:comp.memoryFlush?.enabled?'Enabled':'Disabled',     c:comp.memoryFlush?.enabled?'var(--green)':'var(--dim)'} : null,
       comp.softThresholdTokens       ? {k:'Soft Threshold',   v:comp.softThresholdTokens.toLocaleString()+' tok',   c:'var(--text)'}   : null,
     ].filter(Boolean);
-    const channelRows = [
-      (AC.channels||[]).length       ? {k:'Active Channels',    v:(AC.channels).join(', ')}                        : null,
+    const runtimeRows = [
       AC.telegramDmPolicy            ? {k:'Telegram DM Policy', v:AC.telegramDmPolicy}                             : null,
       AC.telegramGroups              ? {k:'Telegram Groups',    v:AC.telegramGroups+' configured'}                 : null,
     ].filter(Boolean);
     $('runtimeConfigPanel').innerHTML = [
-      compCards.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;margin-bottom:${channelRows.length?8:0}px">
+      compCards.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;margin-bottom:${runtimeRows.length?8:0}px">
         ${compCards.map(r=>`<div style="background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:5px;padding:6px 8px">
           <div style="font-size:9px;color:var(--muted);margin-bottom:2px">${esc(r.k)}</div>
           <div style="font-size:12px;font-weight:600;color:${r.c}">${esc(r.v)}</div>
         </div>`).join('')}
       </div>` : '',
-      channelRows.length ? `<div style="${compCards.length?'padding-top:8px;border-top:1px solid var(--border)':''}">
-        ${channelRows.map(r=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      runtimeRows.length ? `<div style="${compCards.length?'padding-top:8px;border-top:1px solid var(--border)':''}">
+        ${runtimeRows.map(r=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
           <span style="font-size:12px;color:var(--muted);min-width:140px">${esc(r.k)}</span>
           <span style="font-size:12px;color:var(--text);font-weight:600">${esc(r.v)}</span>
         </div>`).join('')}
       </div>` : '',
-      !compCards.length && !channelRows.length ? '<div style="color:var(--dim);font-size:11px">No runtime config detected.</div>' : ''
+      !compCards.length && !runtimeRows.length ? '<div style="color:var(--dim);font-size:11px">No runtime config detected.</div>' : ''
     ].join('');
 
     // Helper: key-value row
     const kv = (k,v,c='var(--text)') => `<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:12px;color:var(--muted)">${esc(k)}</span><span style="font-size:12px;color:${c};font-weight:600">${esc(String(v))}</span></div>`;
     const badge = (label,on) => `<span style="display:inline-block;margin:2px 2px;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600;background:${on?'rgba(74,222,128,.12)':'rgba(255,255,255,.05)'};color:${on?'var(--green)':'var(--dim)'};border:1px solid ${on?'rgba(74,222,128,.3)':'var(--border)'}">${esc(label)}</span>`;
+
+    // Channels Panel — dynamic rendering for all configured/runtime channels
+    const channelStatusMap = AC.channelStatus && typeof AC.channelStatus === 'object' ? AC.channelStatus : {};
+    const channelKeys = Array.from(new Set([
+      ...Object.keys(channelStatusMap),
+      ...((AC.channels||[]).filter(c=>typeof c==='string')),
+    ])).sort();
+
+    const normalizeHealth = v => {
+      if (v == null) return null;
+      if (typeof v === 'string') return v;
+      if (typeof v === 'boolean') return v ? 'healthy' : 'unhealthy';
+      if (typeof v === 'object') {
+        const state = v.state || v.status || v.level;
+        if (state != null) return String(state);
+      }
+      return String(v);
+    };
+
+    const channelCards = channelKeys.map((key)=>{
+      const raw = channelStatusMap[key] && typeof channelStatusMap[key] === 'object' ? channelStatusMap[key] : {};
+      const enabled = typeof raw.enabled === 'boolean' ? raw.enabled : (AC.channels||[]).includes(key);
+      const configured = typeof raw.configured === 'boolean' ? raw.configured : true;
+      const connected = typeof raw.connected === 'boolean' ? raw.connected : null;
+      const health = normalizeHealth(raw.health);
+      const error = raw.error == null ? '' : String(raw.error);
+      const connectedText = connected===null ? 'Unknown' : (connected ? 'Yes' : 'No');
+      const healthText = health || 'Unknown';
+      const errorText = error ? error : '—';
+
+      return `<div style="background:var(--glass);border:1px solid var(--border);border-radius:6px;padding:8px 9px;margin-bottom:6px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+          <span style="font-size:12px;font-weight:700;color:var(--textStrong)">${esc(key)}</span>
+          <span class="badge ${enabled?'badge-ok':'badge-none'}" style="font-size:9px">${enabled?'ENABLED':'DISABLED'}</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);display:grid;grid-template-columns:auto 1fr;gap:3px 8px">
+          <span>Configured</span><span style="color:${configured?'var(--green)':'var(--red)'}">${configured?'Yes':'No'}</span>
+          <span>Connected</span><span style="color:${connected===null?'var(--dim)':(connected?'var(--green)':'var(--red)')}">${esc(connectedText)}</span>
+          <span>Health</span><span>${esc(healthText)}</span>
+          <span>Error</span><span style="color:${error?'var(--red)':'var(--dim)'};word-break:break-word">${esc(errorText)}</span>
+        </div>
+      </div>`;
+    });
+    $('channelConfigPanel').innerHTML = channelCards.length ? channelCards.join('') : '<span style="color:var(--dim);font-size:12px">No channels found in payload.</span>';
 
     // Search Panel
     const SR = AC.search||{};
@@ -853,20 +902,36 @@ function render(){
     // Bindings
     const bindings = AC.bindings||[];
     const agentColMap={};agentList.forEach((a,i)=>agentColMap[a.id]=PALETTE[i%PALETTE.length]);
-    $('bindingsPanel').innerHTML = bindings.length
-      ? `<div style="display:flex;flex-wrap:wrap;gap:8px">${bindings.map(b=>{
+    const defaultAgent = (agentList.find(a=>a.isDefault)||{}).id || (bindings.find(b=>b.kind==='default')||{}).agentId || 'main';
+
+    // Add inferred per-channel bindings so newly configured channels (slack/discord/etc.) are visible
+    const observedChannels = Array.from(new Set([
+      ...((AC.channels||[]).filter(c=>typeof c==='string')),
+      ...Object.keys((AC.channelStatus&&typeof AC.channelStatus==='object')?AC.channelStatus:{}),
+    ])).sort();
+    const explicitChannels = new Set(bindings.filter(b=>b && b.kind!=='default').map(b=>String(b.channel||'')));
+    const inferredBindings = observedChannels
+      .filter(ch=>ch && !explicitChannels.has(ch))
+      .map(ch=>({agentId: defaultAgent, channel: ch, kind: 'implicit', id: '', name: `Auto route (${ch})`}));
+
+    const allBindings = [...bindings, ...inferredBindings];
+
+    $('bindingsPanel').innerHTML = allBindings.length
+      ? `<div style="display:flex;flex-wrap:wrap;gap:8px">${allBindings.map(b=>{
           const col=agentColMap[b.agentId]||'var(--dim)';
           const isDefault=b.kind==='default';
-          const displayName=b.name||(isDefault?'All unmatched channels':b.id);
-          const icon=isDefault?'🌐':b.channel==='telegram'?'✈️':'📡';
+          const isImplicit=b.kind==='implicit';
+          const displayName=b.name||(isDefault?'All unmatched channels':(isImplicit?`Auto route (${b.channel})`:b.id));
+          const icon=isDefault?'🌐':b.channel==='telegram'?'✈️':b.channel==='slack'?'💬':b.channel==='discord'?'🎮':'📡';
           return `<div style="background:var(--glass);border:1px solid var(--border);border-left:3px solid ${col};border-radius:6px;padding:8px 12px;min-width:180px">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
               <span style="font-size:12px">${icon}</span>
               <span style="font-size:12px;font-weight:700;color:${col}">${esc(b.agentId)}</span>
               ${isDefault?'<span style="font-size:9px;background:rgba(74,222,128,.12);color:var(--green);border:1px solid rgba(74,222,128,.25);border-radius:3px;padding:1px 4px">DEFAULT</span>':''}
+              ${isImplicit?'<span style="font-size:9px;background:rgba(59,130,246,.12);color:var(--blue);border:1px solid rgba(59,130,246,.25);border-radius:3px;padding:1px 4px">IMPLICIT</span>':''}
             </div>
             <div style="font-size:13px;font-weight:600;color:var(--textStrong)">${esc(displayName)}</div>
-            ${!isDefault?`<div style="font-size:10px;color:var(--dim);margin-top:2px;font-family:monospace">${esc(b.channel)} · ${esc(b.kind)} · ${esc(b.id)}</div>`:'<div style="font-size:10px;color:var(--dim);margin-top:2px">catch-all fallback</div>'}
+            ${!isDefault?`<div style="font-size:10px;color:var(--dim);margin-top:2px;font-family:monospace">${esc(b.channel)} · ${esc(b.kind)} · ${esc(b.id||'—')}</div>`:'<div style="font-size:10px;color:var(--dim);margin-top:2px">catch-all fallback</div>'}
           </div>`;
         }).join('')}</div>`
       : '<span style="color:var(--dim);font-size:12px">No explicit bindings — all messages go to default agent</span>';

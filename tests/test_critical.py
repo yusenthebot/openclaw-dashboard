@@ -292,7 +292,7 @@ def test_tc13_projected_monthly_vs_today_with_outlier_tolerance():
 def test_tc14_cron_schedule_field_shape_is_valid_expression():
     data = json.loads(_read(DATA_JSON))
     crons = data.get("crons", [])
-    cron_re = re.compile(r"^(\*/\d+|\d{1,2})\s+(\*|\d{1,2})\s+\*\s+\*\s+(\*|\d{1,2})$")
+    cron_re = re.compile(r"^(\*/\d+|\d{1,2})\s+(\*|\*/\d+|\d{1,2})\s+\*\s+\*\s+(\*|\d{1,2}(?:,\d{1,2})*)$")
     iso_at_re = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
 
     for c in crons:

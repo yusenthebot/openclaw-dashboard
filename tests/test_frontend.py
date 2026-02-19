@@ -65,6 +65,19 @@ class TestFrontendJS(unittest.TestCase):
         """AC20: prevD = JSON.parse(JSON.stringify(D)) snapshot exists."""
         self.assertIn("prevD = JSON.parse(JSON.stringify(D))", self.html)
 
+    def test_channels_dynamic_render_from_payload_keys(self):
+        """Channel cards render dynamically from channelStatus keys + channels array."""
+        self.assertIn("const channelStatusMap = AC.channelStatus", self.html)
+        self.assertIn("...Object.keys(channelStatusMap)", self.html)
+        self.assertIn("...((AC.channels||[])", self.html)
+        self.assertIn("$('channelConfigPanel').innerHTML", self.html)
+
+    def test_channels_supports_slack_discord_unknown_generically(self):
+        """No hardcoded channel whitelist (slack/discord/unknown are generic keys)."""
+        self.assertIn("const channelCards = channelKeys.map((key)=>", self.html)
+        self.assertIn("esc(key)", self.html)
+        self.assertIn("esc(errorText)", self.html)
+
 
 class TestRefreshShSafety(unittest.TestCase):
     """AC21-AC22, AC24: refresh.sh safety checks."""
