@@ -6,7 +6,7 @@ A beautiful, zero-dependency command center for [OpenClaw](https://github.com/op
 
 ## Why This Exists
 
-When you run OpenClaw seriously — multiple agents, dozens of cron jobs, sub-agents spawning sub-agents, several Telegram groups, 10+ models — information gets scattered fast.
+When you run OpenClaw seriously — multiple agents, dozens of cron jobs, sub-agents spawning sub-agents, several Telegram groups and Whatsapp, Slack, and Discord channels, 10+ models, multiple agents and sub-agents — information gets scattered fast.
 
 **The problem:** there was no single place to answer the obvious questions:
 - Is my gateway actually running right now?
