@@ -235,13 +235,18 @@ if os.path.exists(config_path):
         if agent_list:
             for i, ag in enumerate(agent_list):
                 aid = ag.get('id', f'agent-{i}')
-                amodel = ag.get('model', primary)
+                model_cfg = ag.get('model', primary)
+                if isinstance(model_cfg, dict):
+                    amodel = model_cfg.get('primary', primary)
+                    agent_fallbacks = model_cfg.get('fallbacks', fallbacks)
+                else:
+                    amodel = model_cfg
+                    agent_fallbacks = ag.get('fallbacks', fallbacks)
                 params = model_params.get(amodel, {})
                 is_default = ag.get('default', False)
                 # Derive a human role: prefer explicit 'role' field, else capitalise id
                 role = ag.get('role', 'Default' if is_default else aid.replace('-',' ').title())
-                # Per-agent fallbacks: agent-specific override or inherit globals
-                agent_fallbacks = ag.get('fallbacks', fallbacks)
+                # Per-agent fallbacks now handled above (supports dict-style model config)
                 agent_config['agents'].append({
                     'id': aid,
                     'role': role,
