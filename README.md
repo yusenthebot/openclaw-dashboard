@@ -276,6 +276,10 @@ rm -rf ~/.openclaw/dashboard
 
 ## Changelog
 
+### v2026.2.21
+
+- **Fixed**: `refresh.sh` now correctly handles agents with dictionary-style `model` configs (containing `primary` and `fallbacks` keys). Previously, dict-type model configs caused TypeError and prevented those agents from appearing in the dashboard. (Fixes #2)
+
 ### v2026.2.20
 
 - **New**: Dynamic channels panel renders all configured/runtime channels (Slack, Discord, Telegram, WhatsApp, and unknown future channels)
