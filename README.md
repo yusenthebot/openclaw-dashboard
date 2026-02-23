@@ -24,7 +24,7 @@ It's not trying to replace the OpenClaw CLI or Telegram interface. It's the at-a
 
 ## Features
 
-### 10 Dashboard Panels
+### 11 Dashboard Panels
 
 1. **🔔 Header Bar** — Bot name, online/offline status, auto-refresh countdown, theme picker
 2. **⚠️ Alerts Banner** — Smart alerts for high costs, failed crons, high context usage, gateway offline
@@ -36,6 +36,7 @@ It's not trying to replace the OpenClaw CLI or Telegram interface. It's the at-a
 8. **🤖 Sub-Agent Activity** — Sub-agent runs with cost, duration, status + token breakdown (7d/30d tabs)
 9. **📈 Charts & Trends** — Cost trend line, model cost breakdown bars, sub-agent activity — all pure SVG, 7d/30d toggle
 10. **🧩 Bottom Row** — Available models grid, skills list, git log
+11. **💬 AI Chat** — Ask questions about your dashboard in natural language, powered by your OpenClaw gateway
 
 ### Key Features
 
@@ -47,6 +48,7 @@ It's not trying to replace the OpenClaw CLI or Telegram interface. It's the at-a
 - 🔒 **Local Only** — Runs on localhost, no external dependencies
 - 🐧 **Cross-Platform** — macOS and Linux
 - ⚡ **Zero Dependencies** — Pure HTML/CSS/JS frontend, Python stdlib backend
+- 💬 **AI Chat** — Natural language queries about costs, sessions, crons, and config via OpenClaw gateway
 
 ## Quick Start
 
@@ -136,14 +138,16 @@ Add your own themes by editing `themes.json`. Each theme defines 19 CSS color va
 ## Architecture
 
 ```
-server.py          ← HTTP server + /api/refresh endpoint
-  ├── index.html   ← Single-page dashboard (fetches /api/refresh)
+server.py          ← HTTP server + /api/refresh + /api/chat endpoints
+  ├── index.html   ← Single-page dashboard (fetches /api/refresh, /api/chat)
   ├── themes.json  ← Theme definitions (user-editable)
   ├── refresh.sh   ← Data collection script (called by server.py)
   └── data.json    ← Generated data (auto-refreshed)
 ```
 
 When you open the dashboard, `index.html` calls `/api/refresh`. The server runs `refresh.sh` (with 30s debounce) to collect fresh data from your OpenClaw installation, then returns the JSON. No cron jobs needed.
+
+The `/api/chat` endpoint accepts `{"question": "...", "history": [...]}` and forwards a stateless request to the OpenClaw gateway's OpenAI-compatible `/v1/chat/completions` endpoint, with a system prompt built from live `data.json`.
 
 ## Configuration
 
@@ -184,6 +188,25 @@ Edit `config.json`:
 | `server.port` | `8080` | Server port (also `--port` / `-p` flag or `DASHBOARD_PORT` env) |
 | `server.host` | `"127.0.0.1"` | Server bind address (also `--bind` / `-b` flag or `DASHBOARD_BIND` env) |
 | `openclawPath` | `"~/.openclaw"` | Legacy key; runtime path is currently controlled by `OPENCLAW_HOME` env var |
+| `ai.enabled` | `true` | Enable/disable the AI chat panel and `/api/chat` endpoint |
+| `ai.gatewayPort` | `18789` | Port of your OpenClaw gateway |
+| `ai.model` | `""` | Model to use for chat (any model registered in your gateway) |
+| `ai.maxHistory` | `6` | Number of previous messages to include for context |
+| `ai.dotenvPath` | `"~/.openclaw/.env"` | Path to `.env` file containing `OPENCLAW_GATEWAY_TOKEN` |
+
+### AI Chat Setup
+
+The chat panel requires:
+
+1. Your OpenClaw gateway running with the `chatCompletions` endpoint enabled:
+   ```json
+   "gateway": {
+     "http": { "endpoints": { "chatCompletions": { "enabled": true } } }
+   }
+   ```
+2. `OPENCLAW_GATEWAY_TOKEN` set in your `.env` file (defaults to `~/.openclaw/.env`)
+
+The chat is stateless — each question is sent directly to the gateway with a system prompt built from live `data.json`. No agent memory or tools bleed in.
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for full details.
 
