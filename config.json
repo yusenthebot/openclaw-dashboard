@@ -23,5 +23,12 @@
     "port": 8080,
     "host": "127.0.0.1"
   },
-  "openclawPath": "~/.openclaw"
+  "openclawPath": "~/.openclaw",
+  "ai": {
+    "enabled": true,
+    "gatewayPort": 18789,
+    "model": "",
+    "maxHistory": 6,
+    "dotenvPath": "~/.openclaw/.env"
+  }
 }

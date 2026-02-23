@@ -187,6 +187,31 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
 
 @media(max-width:1024px){.cost-row{grid-template-columns:repeat(2,1fr)}.health-row{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:768px){.grid-2,.grid-3{grid-template-columns:1fr}.cost-row.health-row{grid-template-columns:repeat(2,1fr)}}
+
+/* AI Chat Panel */
+.chat-fab{position:fixed;bottom:24px;right:24px;width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 4px 20px rgba(99,102,241,.4);z-index:1000;transition:transform .2s}
+.chat-fab:hover{transform:scale(1.1)}
+.chat-panel{position:fixed;bottom:84px;right:24px;width:360px;max-height:520px;display:none;flex-direction:column;border-radius:16px;border:1px solid var(--border);background:var(--bg);box-shadow:0 8px 40px rgba(0,0,0,.5);z-index:999;overflow:hidden}
+.chat-panel.open{display:flex}
+.chat-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface)}
+.chat-header-title{font-size:13px;font-weight:700;color:var(--textStrong)}
+.chat-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:2px 6px;border-radius:4px}
+.chat-close:hover{color:var(--textStrong);background:var(--surfaceHover)}
+.chat-messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;min-height:200px;max-height:340px}
+.chat-bubble{padding:8px 12px;border-radius:10px;font-size:12px;line-height:1.5;max-width:90%;word-wrap:break-word;white-space:pre-wrap}
+.chat-bubble.user{background:rgba(99,102,241,.15);color:var(--text);border:1px solid rgba(99,102,241,.2);align-self:flex-end;border-radius:10px 10px 2px 10px}
+.chat-bubble.assistant{background:var(--surface);color:var(--text);border:1px solid var(--border);align-self:flex-start;border-radius:10px 10px 10px 2px}
+.chat-bubble.error{background:rgba(248,113,113,.08);color:var(--red);border:1px solid rgba(248,113,113,.2);align-self:flex-start}
+.chat-bubble.thinking{color:var(--dim);font-style:italic;align-self:flex-start}
+.chat-quick{display:flex;flex-wrap:wrap;gap:4px;padding:8px 12px;border-top:1px solid var(--border)}
+.chat-chip{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:4px 10px;font-size:10px;color:var(--muted);cursor:pointer;transition:all .15s;white-space:nowrap}
+.chat-chip:hover{background:var(--surfaceHover);color:var(--textStrong);border-color:var(--accent)}
+.chat-input-row{display:flex;gap:6px;padding:10px 12px;border-top:1px solid var(--border);background:var(--surface)}
+.chat-input{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:12px;color:var(--text);font-family:inherit;resize:none;outline:none;transition:border-color .15s}
+.chat-input:focus{border-color:var(--accent)}
+.chat-send{background:var(--accent);border:none;border-radius:8px;padding:7px 12px;color:#fff;font-size:13px;cursor:pointer;transition:background .15s;flex-shrink:0}
+.chat-send:hover{background:var(--accent2)}
+.chat-send:disabled{opacity:.5;cursor:not-allowed}
 </style>
 </head>
 <body>
@@ -1155,6 +1180,81 @@ function renderSubagentChart(id,data){
 
 setInterval(()=>{timer--;if(timer<=0){loadData();timer=60}$('countdown').textContent=timer+'s'},1000);
 loadData();
+
+// ── AI Chat ──
+let chatHistory=[];
+const CHAT_MAX_HISTORY=6;
+
+function toggleChat(){
+  const panel=$('chatPanel');
+  panel.classList.toggle('open');
+  if(panel.classList.contains('open'))$('chatInput').focus();
+}
+
+function appendMessage(role,text){
+  const msgs=$('chatMessages');
+  const div=document.createElement('div');
+  div.className='chat-bubble '+role;
+  div.textContent=text;
+  msgs.appendChild(div);
+  msgs.scrollTop=msgs.scrollHeight;
+  return div;
+}
+
+async function sendChat(prefill){
+  const input=$('chatInput');
+  const question=(prefill!==undefined?prefill:input.value).trim();
+  if(!question)return;
+  input.value='';
+  $('chatSend').disabled=true;
+  appendMessage('user',question);
+  const thinking=appendMessage('thinking','…');
+  try{
+    const res=await fetch('/api/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({question,history:chatHistory.slice(-CHAT_MAX_HISTORY)}),
+    });
+    const data=await res.json();
+    thinking.remove();
+    if(data.answer){
+      appendMessage('assistant',data.answer);
+      chatHistory.push({role:'user',content:question});
+      chatHistory.push({role:'assistant',content:data.answer});
+      if(chatHistory.length>CHAT_MAX_HISTORY*2)chatHistory=chatHistory.slice(-CHAT_MAX_HISTORY*2);
+    }else{
+      appendMessage('error','Error: '+(data.error||'Unknown error'));
+    }
+  }catch(e){
+    thinking.remove();
+    appendMessage('error','Network error: '+e.message);
+  }finally{
+    $('chatSend').disabled=false;
+    input.focus();
+  }
+}
 </script>
+
+<!-- AI Chat Panel -->
+<button class="chat-fab" id="chatBtn" onclick="toggleChat()" title="Ask AI about your dashboard">💬</button>
+<div class="chat-panel" id="chatPanel">
+  <div class="chat-header">
+    <span class="chat-header-title">🤖 Dashboard AI</span>
+    <button class="chat-close" onclick="toggleChat()">✕</button>
+  </div>
+  <div class="chat-messages" id="chatMessages">
+    <div class="chat-bubble assistant">Hi! Ask me anything about your dashboard — costs, sessions, crons, or configuration.</div>
+  </div>
+  <div class="chat-quick" id="chatQuick">
+    <button class="chat-chip" onclick="sendChat('Summarize today\'s costs')">Today's costs</button>
+    <button class="chat-chip" onclick="sendChat('Are there any alerts or issues?')">Alerts</button>
+    <button class="chat-chip" onclick="sendChat('Which model is costing the most?')">Top model</button>
+    <button class="chat-chip" onclick="sendChat('What is the gateway status and uptime?')">Gateway</button>
+  </div>
+  <div class="chat-input-row">
+    <textarea class="chat-input" id="chatInput" rows="1" placeholder="Ask about metrics, costs, crons…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"></textarea>
+    <button class="chat-send" id="chatSend" onclick="sendChat()">↑</button>
+  </div>
+</div>
 </body>
 </html>
