@@ -19,6 +19,8 @@ bash tests/run_tests.sh
 
 | File | Type | Server needed? | ACs covered |
 |------|------|----------------|-------------|
+| `test_chat.py` | Unit + Integration | Partial (unit tests no server; endpoint tests start server) | AC-CHAT-1..AC-CHAT-8 |
+| `test_critical.py` | Static + Integration smoke | Partial (mixed static/runtime checks) | TC1-TC20 |
 | `test_server.py` | Integration | No (self-contained — starts own server) | AC1-AC8 |
 | `test_data_schema.py` | Static | No (reads data.json) | AC9-AC14 |
 | `test_frontend.py` | Static analysis | No (reads source files) | AC15-AC24 |
@@ -54,6 +56,16 @@ bash tests/run_tests.sh
 - **AC22:** `set -euo pipefail` in refresh.sh
 - **AC23:** No CORS wildcard `*` in server.py
 - **AC24:** json.load uses context managers (no bare `open()`)
+
+### AI Chat Tests (test_chat.py)
+- **AC-CHAT-1:** `config.json` contains required `ai` keys
+- **AC-CHAT-2:** `read_dotenv()` parses dotenv safely
+- **AC-CHAT-3:** `build_dashboard_prompt()` includes required context sections
+- **AC-CHAT-4:** `call_gateway()` gracefully handles unreachable gateway
+- **AC-CHAT-5:** POST `/api/chat` returns 200 with `answer` or `error`
+- **AC-CHAT-6:** Empty question returns 400
+- **AC-CHAT-7:** Missing question key returns 400
+- **AC-CHAT-8:** Invalid JSON body returns 400
 
 ## Adding New Tests
 

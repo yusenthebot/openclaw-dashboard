@@ -36,7 +36,14 @@ Note: some legacy compatibility keys still appear in examples (`refresh.autoRefr
     "port": 8080,
     "host": "127.0.0.1"
   },
-  "openclawPath": "~/.openclaw"
+  "openclawPath": "~/.openclaw",
+  "ai": {
+    "enabled": true,
+    "gatewayPort": 18789,
+    "model": "",
+    "maxHistory": 6,
+    "dotenvPath": "~/.openclaw/.env"
+  }
 }
 ```
 
@@ -137,11 +144,39 @@ Toggle individual panels on/off. All default to `true`.
 |-----|------|---------|-------------|
 | `openclawPath` | string | `"~/.openclaw"` | Legacy key (current runtime uses `OPENCLAW_HOME` env var instead). |
 
+### AI Chat
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `ai.enabled` | boolean | `true` | Enable/disable AI chat panel and `/api/chat` endpoint |
+| `ai.gatewayPort` | number | `18789` | OpenClaw gateway port used for chat completions |
+| `ai.model` | string | `""` | Gateway model ID for chat requests |
+| `ai.maxHistory` | number | `6` | Server-side cap for previous chat messages included in context |
+| `ai.dotenvPath` | string | `"~/.openclaw/.env"` | Path to dotenv file containing `OPENCLAW_GATEWAY_TOKEN` |
+
+### AI Chat Setup
+
+1. Enable OpenAI-compatible chat completions in your OpenClaw gateway config:
+
+```json
+"gateway": {
+  "http": {
+    "endpoints": {
+      "chatCompletions": { "enabled": true }
+    }
+  }
+}
+```
+
+2. Ensure `OPENCLAW_GATEWAY_TOKEN` exists in your dotenv file (default: `~/.openclaw/.env`).
+3. Restart gateway and dashboard after changing gateway or dotenv config.
+
 ## Environment Variables
 
 | Variable | Description |
 |----------|-------------|
 | `OPENCLAW_HOME` | Set OpenClaw installation path for `refresh.sh` and installer (runtime source of truth) |
+| `OPENCLAW_GATEWAY_TOKEN` | Gateway bearer token consumed by `server.py` via `ai.dotenvPath` |
 
 ## Data Flow
 
@@ -150,5 +185,6 @@ Toggle individual panels on/off. All default to `true`.
 3. `server.py` runs `refresh.sh` (debounced)
 4. `refresh.sh` reads OpenClaw data → writes `data.json`
 5. `server.py` returns `data.json` content
-6. Dashboard renders all panels
-7. Auto-refresh repeats every 60 seconds
+6. Dashboard renders all panels (including AI chat UI if enabled)
+7. AI chat uses `POST /api/chat` with `{question, history}` and receives `{answer}` or `{error}`
+8. Auto-refresh repeats every 60 seconds

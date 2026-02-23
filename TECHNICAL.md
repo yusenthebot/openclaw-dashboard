@@ -30,11 +30,11 @@
 |------|------:|---------|
 | `index.html` | 1160 | Single-file frontend — embedded CSS + JS, glass morphism themed UI, 11 dashboard sections, 6 themes, 3 SVG charts |
 | `themes.json` | 158 | Theme definitions — 6 built-in themes (3 dark + 3 light), 19 CSS variables each |
-| `server.py` | 195 | Python HTTP server — static files + `/api/refresh` endpoint with debounce |
+| `server.py` | ~400 | Python HTTP server — static files + `/api/refresh` + `/api/chat` endpoints |
 | `refresh.sh` | 774 | Bash wrapper invoking inline Python to parse OpenClaw data → `data.json` |
 | `install.sh` | 151 | Cross-platform installer (macOS LaunchAgent / Linux systemd) |
 | `uninstall.sh` | 47 | Service teardown + file cleanup |
-| `config.json` | — | Runtime configuration (bot/theme/server/refresh/alerts; some compatibility keys are currently no-op) |
+| `config.json` | — | Runtime configuration (bot/theme/server/refresh/alerts/ai; some compatibility keys are currently no-op) |
 | `data.json` | — | Generated dashboard data (gitignored) |
 | `docs/CONFIGURATION.md` | — | Configuration reference |
 | `examples/config.full.json` | — | All available config options |
@@ -57,6 +57,14 @@ server.py ─── debounce check ──► refresh.sh ──► data.json.tmp
   │           serve cached         │ reads OpenClaw │
   │                                ▼                ▼
   └──────── read data.json ◄──── data.json
+
+Browser                                              OpenClaw Gateway
+  │ POST /api/chat {"question","history"}                 ▲
+  ▼                                                       │ POST /v1/chat/completions
+server.py handle_chat()                                   │ Bearer token from dotenv
+  ├─ load data.json                                       │
+  ├─ build_dashboard_prompt(data)                         │
+  └─ call_gateway(...) ───────────────────────────────────┘
 ```
 
 ### Debounce Mechanism
@@ -296,7 +304,9 @@ Theme state is stored globally in `THEMES` (all definitions) and `currentTheme` 
 
 - Built on `http.server.HTTPServer` + `SimpleHTTPRequestHandler`
 - Single-threaded request handling (Python's default)
-- One custom route: `GET /api/refresh` (with optional query params)
+- Two custom routes:
+  - `GET /api/refresh` (with optional query params)
+  - `POST /api/chat`
 - All other paths: static file serving from the dashboard directory
 
 ### `/api/refresh` Endpoint
@@ -310,9 +320,22 @@ Theme state is stored globally in `THEMES` (all definitions) and `currentTheme` 
    - fallback CORS origin: `http://localhost:8080`
 4. On error: returns 503 (no data.json) or 500 (other)
 
+### `/api/chat` Endpoint
+
+1. Checks `ai.enabled` from `config.json`
+2. Validates JSON body and non-empty `question`
+3. Trims `history` to `ai.maxHistory` entries (server-side cap)
+4. Loads `data.json` and builds a compact system prompt (`build_dashboard_prompt`)
+5. Calls OpenClaw gateway endpoint:
+   - `POST http://localhost:<ai.gatewayPort>/v1/chat/completions`
+   - headers: `Authorization: Bearer <OPENCLAW_GATEWAY_TOKEN>`
+6. Returns HTTP 200 with either:
+   - `{"answer":"..."}`
+   - `{"error":"..."}`
+
 ### Quiet Logging
 
-`log_message()` is overridden to only print lines containing `/api/refresh` or `error`. Static file requests are suppressed.
+`log_message()` is overridden to only print lines containing `/api/refresh`, `/api/chat`, or `error`. Static file requests are suppressed.
 
 ### LAN Mode
 
@@ -330,6 +353,11 @@ Each setting resolves through a priority chain (highest wins):
 | Port | `--port` / `-p` | `DASHBOARD_PORT` | `server.port` | `8080` |
 | Debounce interval | — | — | `refresh.intervalSeconds` | `30` |
 | OpenClaw path (refresh script) | — | `OPENCLAW_HOME` | *(not read by runtime)* | `~/.openclaw` |
+| AI chat enabled | — | — | `ai.enabled` | `true` |
+| Gateway port | — | — | `ai.gatewayPort` | `18789` |
+| Chat model | — | — | `ai.model` | `""` |
+| Max history (server cap) | — | — | `ai.maxHistory` | `6` |
+| Dotenv path for gateway token | — | — | `ai.dotenvPath` | `"~/.openclaw/.env"` |
 | Bot name | — | — | `bot.name` | `OpenClaw Dashboard` |
 | Bot emoji | — | — | `bot.emoji` | `⚡` |
 | Daily cost high | — | — | `alerts.dailyCostHigh` | `50` |
@@ -337,7 +365,7 @@ Each setting resolves through a priority chain (highest wins):
 | Context % threshold | — | — | `alerts.contextPct` | `80` |
 | Memory threshold | — | — | `alerts.memoryMb` | `640` |
 
-**Implementation detail:** `server.py` applies `config.json` values, then env vars, then CLI args for bind/port. `refresh.sh` resolves OpenClaw path from `OPENCLAW_HOME` (or `~/.openclaw`) and does not read `config.openclawPath`.
+**Implementation detail:** `server.py` applies `config.json` values, then env vars, then CLI args for bind/port. AI config is loaded from `config.json`, while `OPENCLAW_GATEWAY_TOKEN` is read from `ai.dotenvPath` via `read_dotenv()`. `refresh.sh` resolves OpenClaw path from `OPENCLAW_HOME` (or `~/.openclaw`) and does not read `config.openclawPath`.
 
 ---
 
@@ -541,7 +569,7 @@ systemctl --user status openclaw-dashboard
 
 | Dependency | Required For | Notes |
 |------------|-------------|-------|
-| **Python 3.x** | `server.py`, inline Python in `refresh.sh` | stdlib only — `json`, `glob`, `os`, `subprocess`, `http.server`, `collections`, `datetime` |
+| **Python 3.x** | `server.py`, inline Python in `refresh.sh` | stdlib only — `json`, `glob`, `os`, `subprocess`, `http.server`, `urllib`, `threading`, `collections`, `datetime` |
 | **Bash** | `refresh.sh`, `install.sh`, `uninstall.sh` | POSIX-compatible |
 | **Git** | Git log panel, installer | Optional (panel shows empty without it) |
 | **OpenClaw** | Data source | Standard `~/.openclaw` directory structure |
@@ -561,6 +589,8 @@ systemctl --user status openclaw-dashboard
 | **CORS** | Allows localhost/127.0.0.1 origins; fallback header is `http://localhost:8080` |
 | **No HTTPS** | Plain HTTP only; use a reverse proxy for TLS |
 | **Sensitive data in data.json** | Session keys, model usage, costs, cron config, gateway PID |
+| **Gateway token handling** | `/api/chat` uses `OPENCLAW_GATEWAY_TOKEN` loaded from dotenv (`ai.dotenvPath`) |
+| **Prompt safety** | `/api/chat` includes client-supplied `history` in gateway payload; treat this as untrusted input |
 | **No auth/authz** | Anyone who can reach the port can see all data |
 | **Subprocess execution** | `server.py` executes `refresh.sh` via `subprocess.run` — ensure the script isn't writable by others |
 
@@ -573,6 +603,7 @@ systemctl --user status openclaw-dashboard
 - **Polling only** — no WebSocket; frontend polls every 60s, server debounces at 30s
 - **Limited historical data** — `dailyChart` provides 30 days of daily aggregates; no finer granularity
 - **Some config keys are compatibility no-op** — `refresh.autoRefresh`, `openclawPath`, and `panels.kanban` are currently not used by runtime code
+- **Chat history cap is split client/server** — frontend keeps a local 6-message history window; backend also enforces `ai.maxHistory`
 - **Simplistic cost projection** — `today × 30`, not based on historical average
 - **Context % calculation** — `totalTokens / contextTokens × 100` (may exceed 100% in edge cases, capped in display)
 - **Session limit** — only top 20 most recent sessions shown (last 24h)
