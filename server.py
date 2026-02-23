@@ -10,6 +10,8 @@ import subprocess
 import threading
 import time
 import sys
+import urllib.request
+import urllib.error
 
 VERSION = "2.3.0"
 PORT = 8080
@@ -23,6 +25,8 @@ REFRESH_TIMEOUT = 15
 _last_refresh = 0
 _refresh_lock = threading.Lock()
 _debounce_sec = 30
+_ai_cfg = {}
+_gateway_token = ""
 
 
 def load_config():
@@ -34,30 +38,135 @@ def load_config():
         return {}
 
 
-def run_refresh():
-    """Run refresh.sh with debounce and timeout."""
-    global _last_refresh
-    now = time.time()
+def read_dotenv(path):
+    """Read a KEY=VALUE .env file, return dict. Ignores comments and blanks."""
+    result = {}
+    try:
+        expanded = os.path.expanduser(path)
+        with open(expanded, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key, _, value = line.partition("=")
+                    result[key.strip()] = value.strip()
+    except (FileNotFoundError, PermissionError):
+        pass
+    return result
 
-    with _refresh_lock:
-        if now - _last_refresh < _debounce_sec:
-            return True  # debounced, serve cached
 
-        try:
-            subprocess.run(
-                ["bash", REFRESH_SCRIPT],
-                timeout=REFRESH_TIMEOUT,
-                cwd=DIR,
-                capture_output=True,
+def build_dashboard_prompt(data):
+    """Build a compressed system prompt from data.json for the AI assistant."""
+    gw = data.get("gateway") or {}
+    ac = data.get("agentConfig") or {}
+
+    lines = [
+        "You are an AI assistant embedded in the OpenClaw Dashboard.",
+        "Answer questions concisely. Use plain text, no markdown.",
+        f"Data as of: {data.get('lastRefresh', 'unknown')}",
+        "",
+        "=== GATEWAY ===",
+        f"Status: {gw.get('status', '?')} | PID: {gw.get('pid', '?')} | "
+        f"Uptime: {gw.get('uptime', '?')} | Memory: {gw.get('memory', '?')}",
+        "",
+        "=== COSTS ===",
+        f"Today: ${data.get('totalCostToday', 0):.4f} "
+        f"(sub-agents: ${data.get('subagentCostToday', 0):.4f})",
+        f"All-time: ${data.get('totalCostAllTime', 0):.2f} | "
+        f"Projected monthly: ${data.get('projectedMonthly', 0):.0f}",
+    ]
+
+    breakdown = data.get("costBreakdown") or []
+    if breakdown:
+        lines.append("By model (all-time): " + ", ".join(
+            f"{d.get('model', '?')} ${d.get('cost', 0):.2f}"
+            for d in breakdown[:5]
+        ))
+
+    sess = data.get("sessions") or []
+    lines += [
+        "",
+        f"=== SESSIONS ({data.get('sessionCount', len(sess))} total, showing top 3) ===",
+    ]
+    for s in sess[:3]:
+        lines.append(
+            f"  {s.get('name', '?')} | {s.get('model', '?')} | "
+            f"{s.get('type', '?')} | context: {s.get('contextPct', 0)}%"
+        )
+
+    crons = data.get("crons") or []
+    failed = [c for c in crons if c.get("lastStatus") == "error"]
+    lines += [
+        "",
+        f"=== CRON JOBS ({len(crons)} total, {len(failed)} failed) ===",
+    ]
+    for c in crons[:5]:
+        status = c.get("lastStatus", "?")
+        err = f" ERROR: {c.get('lastError', '')}" if status == "error" else ""
+        lines.append(f"  {c.get('name', '?')} | {c.get('schedule', '?')} | {status}{err}")
+
+    alerts = data.get("alerts") or []
+    lines += ["", "=== ALERTS ==="]
+    if alerts:
+        for a in alerts:
+            lines.append(f"  [{a.get('severity', '?').upper()}] {a.get('message', '?')}")
+    else:
+        lines.append("  None")
+
+    lines += [
+        "",
+        "=== CONFIGURATION ===",
+        f"Primary model: {ac.get('primaryModel', '?')}",
+        f"Fallbacks: {', '.join(ac.get('fallbacks', [])) or 'none'}",
+    ]
+
+    return "\n".join(lines)
+
+
+def call_gateway(system, history, question, port, token, model, agent_id):
+    """Call the OpenClaw gateway's OpenAI-compatible chat completions endpoint.
+
+    Returns {"answer": "..."} on success, {"error": "..."} on failure.
+    """
+    messages = [{"role": "system", "content": system}]
+    messages.extend(history)
+    messages.append({"role": "user", "content": question})
+
+    payload = json.dumps({
+        "model": model,
+        "messages": messages,
+        "max_tokens": 512,
+        "stream": False,
+    }).encode()
+
+    req = urllib.request.Request(
+        f"http://localhost:{port}/v1/chat/completions",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+            "x-openclaw-agent-id": agent_id,
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read().decode())
+            content = (
+                body.get("choices", [{}])[0]
+                    .get("message", {})
+                    .get("content", "")
             )
-            _last_refresh = time.time()
-            return True
-        except subprocess.TimeoutExpired:
-            print(f"[dashboard] refresh.sh timed out after {REFRESH_TIMEOUT}s")
-            return False
-        except Exception as e:
-            print(f"[dashboard] refresh.sh failed: {e}")
-            return False
+            return {"answer": content or "(empty response)"}
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        return {"error": f"Gateway HTTP {e.code}: {body[:200]}"}
+    except urllib.error.URLError as e:
+        return {"error": f"Gateway unreachable: {e.reason}"}
+    except Exception as e:
+        return {"error": f"Unexpected error: {e}"}
 
 
 class DashboardHandler(http.server.SimpleHTTPRequestHandler):
@@ -69,6 +178,13 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_refresh()
         else:
             super().do_GET()
+
+    def do_POST(self):
+        if self.path == "/api/chat":
+            self.handle_chat()
+        else:
+            self.send_response(404)
+            self.end_headers()
 
     def handle_refresh(self):
         run_refresh()
@@ -97,23 +213,76 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"error": str(e)}).encode())
 
+    def handle_chat(self):
+        if not _ai_cfg.get("enabled", True):
+            self._send_json(503, {"error": "AI chat is disabled in config.json"})
+            return
+
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(length))
+        except (json.JSONDecodeError, ValueError):
+            self._send_json(400, {"error": "Invalid JSON body"})
+            return
+
+        question = body.get("question", "").strip()
+        if not question:
+            self._send_json(400, {"error": "question is required and must be non-empty"})
+            return
+
+        history = body.get("history", [])
+        if not isinstance(history, list):
+            history = []
+        max_hist = int(_ai_cfg.get("maxHistory", 6))
+        history = history[-max_hist:]
+
+        try:
+            with open(DATA_FILE, "r") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+
+        system_prompt = build_dashboard_prompt(data)
+        result = call_gateway(
+            system=system_prompt,
+            history=history,
+            question=question,
+            port=int(_ai_cfg.get("gatewayPort", 18789)),
+            token=_gateway_token,
+            model=_ai_cfg.get("model", ""),
+            agent_id=_ai_cfg.get("agentId", "main"),
+        )
+        self._send_json(200, result)
+
+    def _send_json(self, status, data):
+        """Send a JSON response with CORS headers."""
+        body = json.dumps(data).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-cache")
+        origin = self.headers.get("Origin", "")
+        if origin.startswith("http://localhost:") or origin.startswith("http://127.0.0.1:"):
+            self.send_header("Access-Control-Allow-Origin", origin)
+        else:
+            self.send_header("Access-Control-Allow-Origin", "http://localhost:8080")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, format, *args):
         # Quiet logging — only log errors and refreshes
         msg = format % args
-        if "/api/refresh" in msg or "error" in msg.lower():
+        if "/api/refresh" in msg or "/api/chat" in msg or "error" in msg.lower():
             print(f"[dashboard] {msg}")
 
 
 def resolve_config_value(key, cli_val, env_var, config_path, default):
     """Resolve config with priority: CLI flag > env var > config.json > default."""
-    # CLI flag (argparse default is the fallback, so check if explicitly set)
     if cli_val is not None:
         return cli_val
-    # Environment variable
     env_val = os.environ.get(env_var)
     if env_val is not None:
         return env_val
-    # config.json
     cfg = load_config()
     parts = config_path.split(".")
     val = cfg
@@ -128,18 +297,50 @@ def resolve_config_value(key, cli_val, env_var, config_path, default):
     return default
 
 
+def run_refresh():
+    """Run refresh.sh with debounce and timeout."""
+    global _last_refresh
+    now = time.time()
+
+    with _refresh_lock:
+        if now - _last_refresh < _debounce_sec:
+            return True  # debounced, serve cached
+
+        try:
+            subprocess.run(
+                ["bash", REFRESH_SCRIPT],
+                timeout=REFRESH_TIMEOUT,
+                cwd=DIR,
+                capture_output=True,
+            )
+            _last_refresh = time.time()
+            return True
+        except subprocess.TimeoutExpired:
+            print(f"[dashboard] refresh.sh timed out after {REFRESH_TIMEOUT}s")
+            return False
+        except Exception as e:
+            print(f"[dashboard] refresh.sh failed: {e}")
+            return False
+
+
 def main():
     cfg = load_config()
     server_cfg = cfg.get("server", {})
     refresh_cfg = cfg.get("refresh", {})
 
-    # Config.json defaults (lowest priority)
     cfg_bind = server_cfg.get("host", BIND)
     cfg_port = server_cfg.get("port", PORT)
-    global _debounce_sec
+    global _debounce_sec, _ai_cfg, _gateway_token
     _debounce_sec = refresh_cfg.get("intervalSeconds", _debounce_sec)
 
-    # Env vars override config.json
+    # Load AI config and gateway token
+    _ai_cfg = cfg.get("ai", {})
+    dotenv_path = _ai_cfg.get("dotenvPath", "~/.openclaw/.env")
+    env_vars = read_dotenv(dotenv_path)
+    _gateway_token = env_vars.get("OPENCLAW_GATEWAY_TOKEN", "")
+    if _ai_cfg.get("enabled", True) and not _gateway_token:
+        print("[dashboard] WARNING: ai.enabled=true but OPENCLAW_GATEWAY_TOKEN not found in dotenv")
+
     env_bind = os.environ.get("DASHBOARD_BIND", cfg_bind)
     env_port = int(os.environ.get("DASHBOARD_PORT", cfg_port))
 
@@ -177,6 +378,8 @@ examples:
     print(f"[dashboard] v{VERSION}")
     print(f"[dashboard] Serving on http://{args.bind}:{args.port}/")
     print(f"[dashboard] Refresh endpoint: /api/refresh (debounce: {_debounce_sec}s)")
+    if _ai_cfg.get("enabled", True):
+        print(f"[dashboard] AI chat: /api/chat (gateway: localhost:{_ai_cfg.get('gatewayPort', 18789)}, model: {_ai_cfg.get('model', '?')})")
     if args.bind == "0.0.0.0":
         try:
             hostname = socket.gethostname()
