@@ -49,6 +49,7 @@ It's not trying to replace the OpenClaw CLI or Telegram interface. It's the at-a
 - 🐧 **Cross-Platform** — macOS and Linux
 - ⚡ **Zero Dependencies** — Pure HTML/CSS/JS frontend, Python stdlib backend
 - 💬 **AI Chat** — Natural language queries about costs, sessions, crons, and config via OpenClaw gateway
+- 🎯 **Accurate Model Display** — 5-level resolution chain ensures every session/sub-agent shows its real model, not the default
 
 ## Quick Start
 
@@ -304,6 +305,13 @@ rm -rf ~/.openclaw/dashboard
 - Modern web browser
 
 ## Changelog
+
+### v2026.2.24 — Accurate Sub-Agent Model Display
+
+- **Fixed**: Sub-agents now show their **actual model** (e.g., "GPT 5.3 Codex", "Claude Opus 4.6") instead of defaulting to the parent agent's model. Root cause: sub-agents store model in `providerOverride`/`modelOverride` fields, which the dashboard wasn't reading.
+- **New**: 5-level model resolution priority chain — Gateway live data → providerOverride/modelOverride → session store `model` field → JSONL `model_change` event → agent default
+- **New**: Gateway API query in `refresh.sh` — queries `openclaw sessions --json` for live session model data as the primary source of truth (graceful fallback if gateway unavailable)
+- **New**: Model alias resolution — sub-agent models display friendly names instead of raw provider/model IDs
 
 ### v2026.2.23 — AI Chat Integration
 
