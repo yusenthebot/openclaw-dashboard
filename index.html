@@ -1123,10 +1123,29 @@ function renderCostChart(id,data){
   const cw=W-P.l-P.r,ch=H-P.t-P.b;
   const maxY=Math.max(...data.map(d=>d.total))||1;
   const stepX=cw/(data.length-1||1);
-  let pts=data.map((d,i)=>[P.l+i*stepX,P.t+ch-(d.total/maxY)*ch]);
+  // Minimum Y position (50px from bottom) for visibility of tiny values
+  const minY=P.t+ch-50;
+  let pts=data.map((d,i)=>{
+    const linearY=P.t+ch-(d.total/maxY)*ch;
+    // Blend: mostly linear but with minimum for tiny values
+    const y=d.total>0&&linearY>minY?minY+(linearY-minY)*0.3:linearY;
+    return [P.l+i*stepX,y];
+  });
   const line=pts.map((p,i)=>(i?'L':'M')+p[0]+','+p[1]).join(' ');
   const area=line+` L${pts[pts.length-1][0]},${P.t+ch} L${pts[0][0]},${P.t+ch} Z`;
-  const dots=pts.map((p,i)=>`<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="var(--accent)"><title>${esc(data[i].label)}: $${data[i].total.toFixed(2)}</title></circle>`).join('');
+  const dots=pts.map((p,i)=>{
+    const d=data[i];
+    // Larger dots for small values, with white border
+    const isSmall=d.total<maxY*0.1;
+    const r=isSmall?7:4;
+    const stroke=isSmall?' stroke="white" stroke-width="2"':'';
+    // Always show value label
+    const labelY=p[1]-(isSmall?12:8);
+    const labelColor=isSmall?'var(--textStrong)':'var(--dim)';
+    const labelSize=isSmall?10:8;
+    const label=`<text x="${p[0]}" y="${labelY}" text-anchor="middle" fill="${labelColor}" font-size="${labelSize}" font-weight="${isSmall?600:400}">$${d.total.toFixed(d.total<1?2:0)}</text>`;
+    return `<circle cx="${p[0]}" cy="${p[1]}" r="${r}" fill="var(--accent)"${stroke}><title>${esc(d.label)}: $${d.total.toFixed(2)}</title></circle>${label}`;
+  }).join('');
   const yLabels=Array.from({length:5},(_, i)=>{const v=maxY*i/4;const y=P.t+ch-ch*i/4;return `<text x="${P.l-6}" y="${y+3}" text-anchor="end" fill="var(--dim)" font-size="9">$${v.toFixed(0)}</text><line x1="${P.l}" y1="${y}" x2="${W-P.r}" y2="${y}" stroke="var(--border)" stroke-dasharray="2"/>`}).join('');
   const nth=Math.ceil(data.length/7);
   const xLabels=data.map((d,i)=>i%nth===0?`<text x="${P.l+i*stepX}" y="${H-P.b+16}" text-anchor="middle" fill="var(--dim)" font-size="9">${esc(d.label)}</text>`:'').join('');

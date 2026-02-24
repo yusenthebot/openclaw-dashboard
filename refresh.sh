@@ -272,6 +272,30 @@ if os.path.exists(config_path):
     except Exception as _e:
         import sys; print(f"[dashboard warn] {_e}", file=sys.stderr)
 
+# ── Session model resolution from JSONL ──
+AGENT_DEFAULT_MODELS = {"main": "", "work": "", "group": ""}
+
+def get_session_model(session_key, agent_name, session_id):
+    """Read first 10 lines of session JSONL to find model_change event."""
+    if session_id:
+        jsonl_path = os.path.join(base, agent_name, 'sessions', f'{session_id}.jsonl')
+        try:
+            with open(jsonl_path, 'r') as fh:
+                for i, line in enumerate(fh):
+                    if i >= 10: break
+                    try:
+                        obj = json.loads(line)
+                        if obj.get('type') == 'model_change':
+                            provider = obj.get('provider', '')
+                            model_id = obj.get('modelId', '')
+                            if provider and model_id:
+                                return f'{provider}/{model_id}'
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+        except (FileNotFoundError, PermissionError, OSError):
+            pass
+    return AGENT_DEFAULT_MODELS.get(agent_name, 'unknown')
+
 # ── Sessions ──
 known_sids = {}
 sessions_list = []
@@ -323,11 +347,16 @@ for store_file in glob.glob(os.path.join(base, '*/sessions/sessions.json')):
                 display_name = _trim(raw_label) or _trim(subject) or _trim(origin_label) or key_short
                 # Trigger: what context spawned/drives this session
                 trigger = subject or origin_label or raw_label or ''
+                # Resolve model from JSONL file (model_change event)
+                resolved_model = val.get('model', '') or get_session_model(key, agent_name, sid)
+                if resolved_model == 'unknown' or not resolved_model:
+                    resolved_model = get_session_model(key, agent_name, sid)
+
                 sessions_list.append({
                     'name': display_name[:50],
                     'key': key,
                     'agent': agent_name,
-                    'model': val.get('model', 'unknown'),
+                    'model': resolved_model,
                     'contextPct': min(ctx_pct, 100),
                     'lastActivity': updated_str,
                     'updatedAt': updated,

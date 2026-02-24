@@ -2,6 +2,7 @@
 """OpenClaw Dashboard Server — static files + on-demand refresh."""
 
 import argparse
+import functools
 import http.server
 import json
 import os
@@ -27,6 +28,86 @@ _refresh_lock = threading.Lock()
 _debounce_sec = 30
 _ai_cfg = {}
 _gateway_token = ""
+
+
+# Agent default models (from openclaw.json config)
+AGENT_DEFAULT_MODELS = {
+    "main": "",
+    "work": "",
+    "group": "",
+}
+
+OPENCLAW_PATH = os.path.expanduser("~/.openclaw")
+
+
+def _ttl_hash(ttl_seconds=300):
+    """Return a hash that changes every ttl_seconds (default 5 min)."""
+    return int(time.time() // ttl_seconds)
+
+
+@functools.lru_cache(maxsize=512)
+def _get_session_model_cached(session_key, jsonl_path, _ttl):
+    """Cached model lookup from JSONL file. _ttl param drives cache invalidation."""
+    try:
+        with open(jsonl_path, "r") as f:
+            for i, line in enumerate(f):
+                if i >= 10:
+                    break
+                try:
+                    obj = json.loads(line)
+                    if obj.get("type") == "model_change":
+                        provider = obj.get("provider", "")
+                        model_id = obj.get("modelId", "")
+                        if provider and model_id:
+                            return f"{provider}/{model_id}"
+                except (json.JSONDecodeError, ValueError):
+                    continue
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+    return None
+
+
+def get_session_model(session_key, session_file=None):
+    """Get the model for a session by reading its JSONL file.
+
+    Reads first 10 lines looking for a model_change event.
+    Uses LRU cache with 5-minute TTL for performance.
+    Falls back to agent config defaults if JSONL is missing.
+    """
+    # Determine JSONL path from session_file or session_key
+    jsonl_path = None
+    if session_file and os.path.exists(session_file):
+        jsonl_path = session_file
+    else:
+        # Try to find it from sessions.json
+        parts = (session_key or "").split(":")
+        agent_name = parts[1] if len(parts) >= 2 else "main"
+        sessions_json = os.path.join(
+            OPENCLAW_PATH, "agents", agent_name, "sessions", "sessions.json"
+        )
+        try:
+            with open(sessions_json, "r") as f:
+                store = json.load(f)
+            session_data = store.get(session_key, {})
+            sid = session_data.get("sessionId", "")
+            if sid:
+                candidate = os.path.join(
+                    OPENCLAW_PATH, "agents", agent_name, "sessions", f"{sid}.jsonl"
+                )
+                if os.path.exists(candidate):
+                    jsonl_path = candidate
+        except (FileNotFoundError, json.JSONDecodeError, PermissionError):
+            pass
+
+    if jsonl_path:
+        result = _get_session_model_cached(session_key, jsonl_path, _ttl_hash())
+        if result:
+            return result
+
+    # Fallback to agent defaults
+    parts = (session_key or "").split(":")
+    agent_name = parts[1] if len(parts) >= 2 else "main"
+    return AGENT_DEFAULT_MODELS.get(agent_name, "unknown")
 
 
 def load_config():
@@ -173,6 +254,14 @@ def call_gateway(system, history, question, port, token, model):
 class DashboardHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=DIR, **kwargs)
+
+    def end_headers(self):
+        # Prevent browser caching of HTML/JS files
+        if hasattr(self, 'path') and (self.path.endswith('.html') or self.path == '/' or self.path.endswith('.js')):
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+        super().end_headers()
 
     def do_GET(self):
         if self.path == "/api/refresh" or self.path.startswith("/api/refresh?"):
