@@ -128,6 +128,13 @@ func readDotenv(path string) map[string]string {
 		}
 		key := strings.TrimSpace(line[:idx])
 		val := strings.TrimSpace(line[idx+1:])
+		// Strip surrounding quotes (double or single)
+		if len(val) >= 2 {
+			if (val[0] == '"' && val[len(val)-1] == '"') ||
+				(val[0] == '\'' && val[len(val)-1] == '\'') {
+				val = val[1 : len(val)-1]
+			}
+		}
 		result[key] = val
 	}
 	return result

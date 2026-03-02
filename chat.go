@@ -274,9 +274,12 @@ func callGateway(system string, history []chatMessage, question string, port int
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxGatewayResp+1))
 	if err != nil {
 		return "", fmt.Errorf("read error: %w", err)
+	}
+	if len(respBody) > maxGatewayResp {
+		return "", fmt.Errorf("gateway response too large (>%d bytes)", maxGatewayResp)
 	}
 
 	if resp.StatusCode != http.StatusOK {

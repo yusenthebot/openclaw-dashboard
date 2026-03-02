@@ -17,10 +17,11 @@ import (
 )
 
 const (
-	maxBodyBytes   = 64 * 1024
-	maxQuestionLen = 2000
-	maxHistoryItem = 4000
-	refreshTimeout = 15 * time.Second
+	maxBodyBytes    = 64 * 1024
+	maxQuestionLen  = 2000
+	maxHistoryItem  = 4000
+	maxGatewayResp  = 1 << 20 // 1MB limit on gateway response
+	refreshTimeout  = 15 * time.Second
 )
 
 // Pre-defined error JSON responses — avoid map alloc + marshal on hot paths
@@ -223,6 +224,7 @@ func (s *Server) getDataRawCached() ([]byte, error) {
 	if s.cachedDataRaw == nil || mtime.After(s.cachedDataMtime) {
 		s.cachedDataRaw = raw
 		s.cachedDataMtime = mtime
+		s.cachedData = nil // invalidate parsed cache to prevent stale reads
 	}
 	s.dataMu.Unlock()
 	return raw, nil
@@ -254,9 +256,12 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	s.setCORSHeaders(w, r)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	log.Printf("[dashboard] GET /api/refresh")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(data)
+	}
 }
 
 // getDataCached returns parsed data.json, cached by file mtime.

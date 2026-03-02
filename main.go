@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"flag"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
+	"syscall"
+	"time"
 )
 
 //go:embed index.html
@@ -85,10 +89,25 @@ func main() {
 		}
 	}
 
-	if err := httpSrv.ListenAndServe(); err != nil {
-		fmt.Fprintf(os.Stderr, "[dashboard] fatal: %v\n", err)
-		os.Exit(1)
+	// Graceful shutdown on SIGINT/SIGTERM
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "[dashboard] fatal: %v\n", err)
+			os.Exit(1)
+		}
+	}()
+
+	<-stop
+	fmt.Println("\n[dashboard] shutting down...")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := httpSrv.Shutdown(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "[dashboard] shutdown error: %v\n", err)
 	}
+	fmt.Println("[dashboard] stopped")
 }
 
 func localIP() string {
