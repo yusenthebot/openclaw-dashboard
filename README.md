@@ -47,15 +47,62 @@ It's not trying to replace the OpenClaw CLI or Telegram interface. It's the at-a
 - 📱 **Responsive** — Adapts to desktop, tablet, and mobile
 - 🔒 **Local Only** — Runs on localhost, no external dependencies
 - 🐧 **Cross-Platform** — macOS and Linux
-- ⚡ **Zero Dependencies** — Pure HTML/CSS/JS frontend, Python stdlib backend
+- ⚡ **Zero Dependencies** — Pure HTML/CSS/JS frontend, Python stdlib backend, or single Go binary
 - 💬 **AI Chat** — Natural language queries about costs, sessions, crons, and config via OpenClaw gateway
 - 🎯 **Accurate Model Display** — 5-level resolution chain ensures every session/sub-agent shows its real model, not the default
 
 ## Quick Start
 
-### One-Line Install
+Two server options — choose what fits your environment:
+
+| | Go Binary | Python Server |
+|---|---|---|
+| **Install** | Download one file | Clone repo + Python 3 |
+| **Runtime deps** | None | Python 3.6+ |
+| **Throughput** | 37,063 req/s | 940 req/s |
+| **Deploy size** | 6.2 MB | ~81 MB (Python framework) |
+| **Best for** | Production, headless, containers | Quick setup, customization |
+
+> See [BENCHMARK.md](BENCHMARK.md) for the full 9-category performance comparison.
+
+### Option A: Go Binary (recommended)
+
+Download a single pre-built binary — no runtime dependencies needed:
 
 ```bash
+# macOS (Apple Silicon)
+curl -L https://github.com/mudrii/openclaw-dashboard/releases/latest/download/openclaw-dashboard-darwin-arm64.tar.gz | tar xz
+chmod +x openclaw-dashboard-darwin-arm64
+./openclaw-dashboard-darwin-arm64 --port 8080
+
+# macOS (Intel)
+curl -L https://github.com/mudrii/openclaw-dashboard/releases/latest/download/openclaw-dashboard-darwin-amd64.tar.gz | tar xz
+chmod +x openclaw-dashboard-darwin-amd64
+./openclaw-dashboard-darwin-amd64 --port 8080
+
+# Linux (x86_64)
+curl -L https://github.com/mudrii/openclaw-dashboard/releases/latest/download/openclaw-dashboard-linux-amd64.tar.gz | tar xz
+chmod +x openclaw-dashboard-linux-amd64
+./openclaw-dashboard-linux-amd64 --port 8080
+
+# Linux (ARM64 / Raspberry Pi)
+curl -L https://github.com/mudrii/openclaw-dashboard/releases/latest/download/openclaw-dashboard-linux-arm64.tar.gz | tar xz
+chmod +x openclaw-dashboard-linux-arm64
+./openclaw-dashboard-linux-arm64 --port 8080
+```
+
+Verify download integrity:
+```bash
+curl -L https://github.com/mudrii/openclaw-dashboard/releases/latest/download/checksums-sha256.txt -o checksums-sha256.txt
+shasum -a 256 -c checksums-sha256.txt
+```
+
+> **Note:** Place `config.json`, `themes.json`, and `refresh.sh` in the same directory as the binary for full functionality.
+
+### Option B: Python Server
+
+```bash
+# One-line install
 curl -fsSL https://raw.githubusercontent.com/mudrii/openclaw-dashboard/main/install.sh | bash
 ```
 
@@ -66,7 +113,7 @@ This will:
 4. Start `server.py` as a system service
 5. Open http://127.0.0.1:8080
 
-### Manual Install
+### Manual Install (Python)
 
 ```bash
 # Clone the repo
@@ -86,6 +133,15 @@ python3 server.py --bind 0.0.0.0 &
 # Open in browser
 open http://127.0.0.1:8080  # macOS
 xdg-open http://127.0.0.1:8080  # Linux
+```
+
+### Build from Source (Go)
+
+```bash
+git clone https://github.com/mudrii/openclaw-dashboard.git
+cd openclaw-dashboard
+go build -ldflags="-s -w" -o openclaw-dashboard .
+./openclaw-dashboard --port 8080
 ```
 
 ## Themes
@@ -139,12 +195,22 @@ Add your own themes by editing `themes.json`. Each theme defines 19 CSS color va
 ## Architecture
 
 ```
-server.py          ← HTTP server + /api/refresh + /api/chat endpoints
+server.py / openclaw-dashboard (Go)   ← HTTP server (choose one)
   ├── index.html   ← Single-page dashboard (fetches /api/refresh, /api/chat)
   ├── themes.json  ← Theme definitions (user-editable)
-  ├── refresh.sh   ← Data collection script (called by server.py)
+  ├── refresh.sh   ← Data collection script (called by server)
   └── data.json    ← Generated data (auto-refreshed)
 ```
+
+**Two server implementations, same API:**
+
+| | Python (`server.py`) | Go (`openclaw-dashboard`) |
+|---|---|---|
+| Serves `index.html` | From disk | Embedded in binary (`//go:embed`) |
+| `/api/refresh` | Blocking (waits for `refresh.sh`) | Stale-while-revalidate (instant response) |
+| `/api/chat` | Reads `data.json` per request | Mtime-cached `data.json` |
+| Static files | Serves everything (⚠️ including `.git/`) | Allowlisted only (`themes.json`) |
+| Pre-warm | None | Runs `refresh.sh` at startup |
 
 When you open the dashboard, `index.html` calls `/api/refresh`. The server runs `refresh.sh` (with 30s debounce) to collect fresh data from your OpenClaw installation, then returns the JSON. No cron jobs needed.
 
@@ -338,9 +404,18 @@ rm -rf ~/.openclaw/dashboard
 
 ## Requirements
 
+**Go binary (Option A):**
+- Pre-built binary — no runtime dependencies
+- `refresh.sh` + `bash` (for data collection)
+- **OpenClaw** — Installed at `~/.openclaw` ([docs](https://docs.openclaw.ai))
+- **macOS** 10.15+ or **Linux** (Ubuntu 18.04+, Debian 10+, ARM64)
+
+**Python server (Option B):**
 - **Python 3.6+** — Backend server and data collection
 - **OpenClaw** — Installed at `~/.openclaw` ([docs](https://docs.openclaw.ai))
 - **macOS** 10.15+ or **Linux** (Ubuntu 18.04+, Debian 10+)
+
+**Both options:**
 - Modern web browser
 
 ## Contributing
