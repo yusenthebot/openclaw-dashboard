@@ -63,6 +63,9 @@ func main() {
 
 	srv := NewServer(dir, version, cfg, gatewayToken, indexHTML)
 
+	// Pre-warm data.json in background so first browser hit is instant
+	srv.PreWarm()
+
 	addr := fmt.Sprintf("%s:%d", *bind, *port)
 	httpSrv := &http.Server{
 		Addr:    addr,

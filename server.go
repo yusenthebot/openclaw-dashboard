@@ -17,10 +17,10 @@ import (
 )
 
 const (
-	maxBodyBytes    = 64 * 1024
-	maxQuestionLen  = 2000
-	maxHistoryItem  = 4000
-	refreshTimeout  = 15 * time.Second
+	maxBodyBytes   = 64 * 1024
+	maxQuestionLen = 2000
+	maxHistoryItem = 4000
+	refreshTimeout = 15 * time.Second
 )
 
 type Server struct {
@@ -32,8 +32,9 @@ type Server struct {
 	indexHTMLRendered []byte
 	httpClient        *http.Client
 
-	mu          sync.Mutex
-	lastRefresh time.Time
+	mu             sync.Mutex
+	lastRefresh    time.Time
+	refreshRunning bool // prevents overlapping refresh.sh executions
 }
 
 func NewServer(dir, version string, cfg Config, gatewayToken string, indexHTML []byte) *Server {
@@ -50,6 +51,16 @@ func NewServer(dir, version string, cfg Config, gatewayToken string, indexHTML [
 		indexHTMLRendered: []byte(content),
 		httpClient:        &http.Client{Timeout: 60 * time.Second},
 	}
+}
+
+// PreWarm runs refresh.sh once in the background at startup so data.json
+// is ready before the first browser request arrives.
+func (s *Server) PreWarm() {
+	go func() {
+		log.Printf("[dashboard] pre-warming data.json...")
+		s.runRefresh()
+		log.Printf("[dashboard] pre-warm complete")
+	}()
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -86,42 +97,68 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(s.indexHTMLRendered)
 }
 
-// handleRefresh runs refresh.sh (debounced) and returns data.json.
+// runRefresh executes refresh.sh once, preventing overlapping runs.
+// Updates lastRefresh only on success; resets on timeout/failure so next
+// request can retry (parity with server.py behaviour).
+func (s *Server) runRefresh() {
+	s.mu.Lock()
+	if s.refreshRunning {
+		s.mu.Unlock()
+		return // another goroutine is already running refresh
+	}
+	s.refreshRunning = true
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		s.refreshRunning = false
+		s.mu.Unlock()
+	}()
+
+	script := filepath.Join(s.dir, "refresh.sh")
+	cmd := exec.Command("bash", script)
+	cmd.Dir = s.dir
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Run() }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			log.Printf("[dashboard] refresh.sh failed: %v", err)
+			// Do NOT update lastRefresh — allow retry on next request
+			return
+		}
+		// Success: update timestamp so debounce works correctly
+		s.mu.Lock()
+		s.lastRefresh = time.Now()
+		s.mu.Unlock()
+	case <-time.After(refreshTimeout):
+		_ = cmd.Process.Kill()
+		log.Printf("[dashboard] refresh.sh timed out after %s", refreshTimeout)
+		// Do NOT update lastRefresh — allow retry on next request
+	}
+}
+
+// handleRefresh implements stale-while-revalidate:
+// 1. Return existing data.json immediately (if it exists) — zero wait for user
+// 2. Trigger refresh.sh in background if debounce has expired
 func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	debounce := time.Duration(s.cfg.Refresh.IntervalSeconds) * time.Second
-	if debounce == 0 {
-		debounce = 30 * time.Second
-	}
 
 	s.mu.Lock()
-	shouldRun := time.Since(s.lastRefresh) >= debounce
-	if shouldRun {
-		s.lastRefresh = time.Now() // mark early to prevent parallel runs
-	}
+	shouldRun := !s.refreshRunning && time.Since(s.lastRefresh) >= debounce
 	s.mu.Unlock()
 
 	if shouldRun {
-		script := filepath.Join(s.dir, "refresh.sh")
-		cmd := exec.Command("bash", script)
-		cmd.Dir = s.dir
-		done := make(chan error, 1)
-		go func() { done <- cmd.Run() }()
-		select {
-		case err := <-done:
-			if err != nil {
-				log.Printf("[dashboard] refresh.sh failed: %v", err)
-			}
-		case <-time.After(refreshTimeout):
-			_ = cmd.Process.Kill()
-			log.Printf("[dashboard] refresh.sh timed out after %s", refreshTimeout)
-		}
+		go s.runRefresh() // non-blocking — response returns immediately
 	}
 
 	dataPath := filepath.Join(s.dir, "data.json")
 	data, err := os.ReadFile(dataPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			s.sendJSON(w, r, http.StatusServiceUnavailable, map[string]string{"error": "data.json not found"})
+			s.sendJSON(w, r, http.StatusServiceUnavailable, map[string]string{"error": "data.json not found — refresh in progress, try again shortly"})
 		} else {
 			s.sendJSON(w, r, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
@@ -143,7 +180,6 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Body size check
 	lr := io.LimitReader(r.Body, int64(maxBodyBytes)+1)
 	bodyBytes, err := io.ReadAll(lr)
 	if err != nil {
@@ -175,16 +211,17 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate + sanitise history
+	// Validate + sanitise history — inline role switch avoids per-request map alloc
 	maxHist := s.cfg.AI.MaxHistory
-	allowed := map[string]bool{"user": true, "assistant": true}
-	var history []chatMessage
+	history := make([]chatMessage, 0, maxHist)
 	start := len(req.History) - maxHist
 	if start < 0 {
 		start = 0
 	}
 	for _, msg := range req.History[start:] {
-		if !allowed[msg.Role] {
+		switch msg.Role {
+		case "user", "assistant":
+		default:
 			continue
 		}
 		content := msg.Content

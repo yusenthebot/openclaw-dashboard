@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func detectVersion(dir string) string {
-	// 1. git describe --tags --abbrev=0
-	cmd := exec.Command("git", "describe", "--tags", "--abbrev=0")
+	// 1. git describe --tags --abbrev=0 — with 5s timeout (parity with server.py)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "describe", "--tags", "--abbrev=0")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err == nil {

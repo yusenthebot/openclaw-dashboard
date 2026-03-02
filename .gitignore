@@ -23,3 +23,9 @@ frozen-daily.json
 __pycache__/
 *.pyc
 server.log
+
+# Go binaries
+dashboard-go
+dashboard-go-*
+openclaw-dashboard
+openclaw-dashboard-*

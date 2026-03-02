@@ -84,14 +84,21 @@ func loadConfig(dir string) Config {
 	}
 	defer f.Close()
 	_ = json.NewDecoder(f).Decode(&cfg)
-	if cfg.AI.MaxHistory == 0 {
+	// Clamp/default all AI fields — guard against zero, negative, or missing values
+	if cfg.AI.MaxHistory <= 0 {
 		cfg.AI.MaxHistory = 6
 	}
-	if cfg.AI.GatewayPort == 0 {
+	if cfg.AI.GatewayPort <= 0 {
 		cfg.AI.GatewayPort = 18789
 	}
 	if cfg.AI.DotenvPath == "" {
 		cfg.AI.DotenvPath = "~/.openclaw/.env"
+	}
+	if cfg.Refresh.IntervalSeconds <= 0 {
+		cfg.Refresh.IntervalSeconds = 30
+	}
+	if cfg.Server.Port <= 0 {
+		cfg.Server.Port = 8080
 	}
 	return cfg
 }
