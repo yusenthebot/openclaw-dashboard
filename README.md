@@ -144,6 +144,31 @@ go build -ldflags="-s -w" -o openclaw-dashboard .
 ./openclaw-dashboard --port 8080
 ```
 
+### Docker
+
+```bash
+# Go binary (default — 30MB image, recommended)
+docker build -t openclaw-dashboard .
+docker run -p 8080:8080 -v ~/.openclaw:/home/dashboard/.openclaw openclaw-dashboard
+
+# Python server (alternative — 180MB image)
+docker build --target python -t openclaw-dashboard:python .
+docker run -p 8080:8080 -v ~/.openclaw:/home/dashboard/.openclaw openclaw-dashboard:python
+```
+
+### Nix Flake
+
+```bash
+# Go binary (default)
+nix run github:mudrii/openclaw-dashboard
+
+# Python server
+nix run github:mudrii/openclaw-dashboard#python-server
+
+# Dev shell (Go + Python + tools)
+nix develop github:mudrii/openclaw-dashboard
+```
+
 ## Themes
 
 Click the 🎨 button in the header to switch themes instantly — no reload or server restart needed. Choice persists via `localStorage`.
