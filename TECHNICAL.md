@@ -1,6 +1,6 @@
 # TECHNICAL.md — OpenClaw Dashboard Internals
 
-> **Version:** 2026.2.23 · **Repo:** [github.com/mudrii/openclaw-dashboard](https://github.com/mudrii/openclaw-dashboard)
+> **Version:** 2026.3.3 · **Repo:** [github.com/mudrii/openclaw-dashboard](https://github.com/mudrii/openclaw-dashboard)
 >
 > This document covers architecture, data flow, and implementation details for developers and contributors. For features and quick start, see [README.md](README.md).
 
@@ -40,6 +40,7 @@
 | `examples/config.full.json` | — | All available config options |
 | `examples/config.minimal.json` | — | Minimal starter config |
 | `tests/*.py` | — | Automated static + integration tests (pytest/unittest compatible) |
+| `*_test.go` | — | Go test suite — 39 tests covering server, chat, config, and version (run with `go test -race ./...`) |
 | `screenshots/` | — | Dashboard screenshots for README |
 
 ---
@@ -300,7 +301,9 @@ Theme state is stored globally in `THEMES` (all definitions) and `currentTheme` 
 
 ## 6. Server Architecture
 
-### Core
+Two implementations share the same API surface. Both serve `index.html`, `/api/refresh`, and `/api/chat`.
+
+### Python Server (`server.py`)
 
 - Built on `http.server.HTTPServer` + `SimpleHTTPRequestHandler`
 - Single-threaded request handling (Python's default)
@@ -309,37 +312,53 @@ Theme state is stored globally in `THEMES` (all definitions) and `currentTheme` 
   - `POST /api/chat`
 - All other paths: static file serving from the dashboard directory
 
+### Go Server (`openclaw-dashboard` binary)
+
+- Single binary with `index.html` embedded via `//go:embed`
+- Concurrent request handling (Go's `net/http` goroutine-per-request model)
+- Routes: `GET|HEAD /`, `GET|HEAD /api/refresh`, `POST /api/chat`, allowlisted static files
+- All other paths return 404; non-GET/HEAD/POST returns 405
+- **Graceful shutdown**: handles SIGINT/SIGTERM, drains in-flight requests (5s timeout)
+- **Pre-warm**: runs `refresh.sh` at startup so the first browser hit is instant
+- **Dual mtime cache**: `cachedDataRaw` ([]byte for /api/refresh) and `cachedData` (parsed map for /api/chat) share a `sync.RWMutex` with coherence — updating either cache invalidates the other
+- **Allowlisted static files**: only `themes.json` is served; all other files return 404 (unlike Python which serves the entire directory including `.git/config`)
+- **Gateway response limit**: caps upstream response at 1MB
+
 ### `/api/refresh` Endpoint
 
-1. Calls `run_refresh()` (debounced)
-2. Reads `data.json` from disk
-3. Returns it with headers:
+1. Calls `run_refresh()` (debounced, non-blocking in Go)
+2. Returns cached or disk `data.json` with headers:
    - `Content-Type: application/json`
    - `Cache-Control: no-cache`
+   - `Content-Length: <size>`
    - `Access-Control-Allow-Origin: <origin>` when origin is `http://localhost:*` or `http://127.0.0.1:*`
-   - fallback CORS origin: `http://localhost:8080`
+   - fallback CORS origin: `http://localhost:<configured-port>`
+3. Go uses stale-while-revalidate: returns existing cached data immediately, triggers refresh in background if stale
 4. On error: returns 503 (no data.json) or 500 (other)
 
 ### `/api/chat` Endpoint
 
 1. Checks `ai.enabled` from `config.json`
-2. Validates JSON body and non-empty `question`
-3. Trims `history` to `ai.maxHistory` entries (server-side cap)
-4. Loads `data.json` and builds a compact system prompt (`build_dashboard_prompt`)
+2. Validates JSON body (64KB limit) and non-empty `question` (2000 char limit)
+3. Sanitises `history`: only `user`/`assistant` roles, truncates content to 4000 chars, caps at `ai.maxHistory` entries
+4. Loads `data.json` (mtime-cached in Go, per-request in Python) and builds a compact system prompt
 5. Calls OpenClaw gateway endpoint:
    - `POST http://localhost:<ai.gatewayPort>/v1/chat/completions`
    - headers: `Authorization: Bearer <OPENCLAW_GATEWAY_TOKEN>`
-6. Returns HTTP 200 with either:
-   - `{"answer":"..."}`
-   - `{"error":"..."}`
+   - Response capped at 1MB (Go only)
+6. Returns:
+   - HTTP 200 `{"answer":"..."}` on success
+   - HTTP 400 for bad input, 413 for oversized body, 502 for gateway errors, 503 if AI disabled
 
 ### Quiet Logging
 
-`log_message()` is overridden to only print lines containing `/api/refresh`, `/api/chat`, or `error`. Static file requests are suppressed.
+**Python:** `log_message()` is overridden to only print lines containing `/api/refresh`, `/api/chat`, or `error`. Static file requests are suppressed.
+
+**Go:** Uses `log.Printf` for `/api/refresh`, `/api/chat`, and errors. No static file logging.
 
 ### LAN Mode
 
-When bound to `0.0.0.0`, the server auto-detects the local IP via `socket.gethostbyname(socket.gethostname())` and prints it for convenience.
+When bound to `0.0.0.0`, both servers auto-detect the local IP and print it for convenience.
 
 ---
 
@@ -640,9 +659,14 @@ python3 server.py --bind 0.0.0.0 --port 9090
 ### Testing Checklist
 
 ```bash
+# Go tests (39 tests, with race detector)
+go test -race -v ./...
+
+# Python tests
 python3 -m pytest tests/ -v
 ```
 
+- [ ] `go test -race ./...` passes (all 39 tests green)
 - [ ] `bash refresh.sh` produces valid JSON
 - [ ] `data.json` contains expected keys
 - [ ] Dashboard renders on desktop (1440px+)
@@ -653,13 +677,23 @@ python3 -m pytest tests/ -v
 - [ ] Gateway offline state renders correctly
 - [ ] Alerts display with correct severity styling
 
+#### Go Test Coverage
+
+| File | Tests | Coverage |
+|------|------:|----------|
+| `server_test.go` | 18 | Cache coherence, HEAD/GET, static allowlist, path traversal, CORS, routing, index rendering, data missing |
+| `chat_test.go` | 8 | Gateway calls (success, errors, empty, oversized), system prompt building |
+| `config_test.go` | 11 | Config defaults/overrides/clamping, dotenv parsing (quotes, comments, equals), expandHome |
+| `version_test.go` | 3 | VERSION file, fallback, empty file |
+
 ### PR Guidelines
 
 1. **Zero-dependency constraint** — no npm, no pip, no CDN, no external fonts
 2. **Single-file frontend** — CSS and JS stay embedded in `index.html`
 3. **Python stdlib only** — no third-party imports in `server.py` or `refresh.sh`
-4. **Test mobile + desktop** — check both responsive breakpoints
-5. **Run automated tests** — use `pytest` before submitting changes
+4. **Go stdlib only** — no third-party imports in Go source
+5. **Test mobile + desktop** — check both responsive breakpoints
+6. **Run automated tests** — `go test -race ./...` and `pytest` before submitting changes
 
 ### Adding a New Dashboard Panel
 

@@ -233,9 +233,12 @@ server.py / openclaw-dashboard (Go)   ← HTTP server (choose one)
 |---|---|---|
 | Serves `index.html` | From disk | Embedded in binary (`//go:embed`) |
 | `/api/refresh` | Blocking (waits for `refresh.sh`) | Stale-while-revalidate (instant response) |
-| `/api/chat` | Reads `data.json` per request | Mtime-cached `data.json` |
+| `/api/chat` | Reads `data.json` per request | Mtime-cached `data.json` (dual raw+parsed cache) |
 | Static files | Serves everything (⚠️ including `.git/`) | Allowlisted only (`themes.json`) |
 | Pre-warm | None | Runs `refresh.sh` at startup |
+| Shutdown | Immediate kill | Graceful (drains requests, 5s timeout) |
+| Gateway limit | Unbounded | 1MB response cap |
+| Tests | `pytest` (14 tests) | `go test -race` (39 tests) |
 
 When you open the dashboard, `index.html` calls `/api/refresh`. The server runs `refresh.sh` (with 30s debounce) to collect fresh data from your OpenClaw installation, then returns the JSON. No cron jobs needed.
 

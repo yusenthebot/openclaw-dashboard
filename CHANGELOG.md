@@ -1,5 +1,33 @@
 # Changelog
 
+## v2026.3.3 — 2026-03-03
+
+### Fixed
+- **Cache coherence bug** — `getDataRawCached()` now invalidates the parsed data cache when the raw cache is updated. Previously, `/api/refresh` could bump the shared mtime without clearing the parsed cache, causing `/api/chat` to silently use stale dashboard data for its AI context.
+- **HEAD requests on `/api/refresh`** — HEAD responses no longer write a body (HTTP spec compliance). Added missing `Content-Length` header.
+- **Gateway error status code** — `/api/chat` now returns HTTP 502 (Bad Gateway) instead of 200 when the upstream gateway fails. Clients can now distinguish "AI answered" from "AI is down".
+- **`.env` quote stripping** — `readDotenv()` now strips surrounding double and single quotes from values (e.g., `KEY="value"` → `value`).
+
+### Added
+- **Graceful shutdown** — Go binary now handles SIGINT/SIGTERM signals and drains in-flight requests (5s timeout) before exiting. Clean container stops, no more orphaned `refresh.sh` processes or `data.json.tmp` files.
+- **Gateway response size limit** — `callGateway()` now caps response body at 1MB via `LimitReader`. Prevents memory exhaustion from a misbehaving gateway.
+- **Comprehensive Go test suite** — 39 tests with `-race` flag covering:
+  - Cache coherence between raw and parsed caches
+  - HEAD vs GET behavior for all endpoints
+  - Static file allowlist and path traversal defense
+  - CORS origin reflection and rejection
+  - Chat input validation (empty, too long, too large, invalid JSON)
+  - Gateway calls (success, errors, empty responses, oversized responses)
+  - System prompt building with empty and populated data
+  - Config loading (defaults, overrides, invalid JSON, zero-value clamping)
+  - Dotenv parsing (comments, blanks, equals-in-value, quotes, missing file)
+  - Version detection (git tag, VERSION file, fallback)
+
+### Changed
+- **Agent Bindings UI** — Changed from `flex-wrap` to a symmetric 2-column CSS grid layout. Cards are now equal-width with text overflow ellipsis for long names.
+
+---
+
 ## v2026.2.24 — 2026-02-24
 
 ### Fixed
