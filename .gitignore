@@ -29,3 +29,7 @@ dashboard-go
 dashboard-go-*
 openclaw-dashboard
 openclaw-dashboard-*
+
+# Build artifacts
+dist/
+promo-*.png
