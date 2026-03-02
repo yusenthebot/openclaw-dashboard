@@ -84,18 +84,56 @@ func (s *Server) PreWarm() {
 	}()
 }
 
+// allowedStatic is a whitelist of static files the Go server will serve.
+// This is intentionally restrictive — Python serves everything (including
+// .git/config, server.py, config.json) which is a security risk.
+var allowedStatic = map[string]string{
+	"/themes.json": "application/json",
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Accept both GET and HEAD for all read endpoints
+	isRead := r.Method == http.MethodGet || r.Method == http.MethodHead
+
 	switch {
-	case r.Method == http.MethodGet && (r.URL.Path == "/" || r.URL.Path == "/index.html"):
+	case isRead && (r.URL.Path == "/" || r.URL.Path == "/index.html"):
 		s.handleIndex(w, r)
-	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/refresh"):
+	case isRead && strings.HasPrefix(r.URL.Path, "/api/refresh"):
 		s.handleRefresh(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/api/chat":
 		s.handleChat(w, r)
-	case r.Method == http.MethodGet:
+	case isRead:
+		// Serve allowlisted static files from disk
+		if contentType, ok := allowedStatic[r.URL.Path]; ok {
+			s.handleStaticFile(w, r, r.URL.Path, contentType)
+			return
+		}
 		http.NotFound(w, r)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleStaticFile serves an allowlisted file from the dashboard directory.
+func (s *Server) handleStaticFile(w http.ResponseWriter, r *http.Request, path, contentType string) {
+	// Clean the path to prevent traversal
+	clean := filepath.Clean(path)
+	if clean != path || strings.Contains(clean, "..") {
+		http.NotFound(w, r)
+		return
+	}
+	fullPath := filepath.Join(s.dir, clean)
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(data)
 	}
 }
 
@@ -115,7 +153,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Expires", "0")
 	w.Header().Set("Content-Length", s.indexContentLength)
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(s.indexHTMLRendered)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(s.indexHTMLRendered)
+	}
 }
 
 // runRefresh executes refresh.sh once using exec.CommandContext.
