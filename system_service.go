@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -92,12 +90,21 @@ func (s *SystemService) GetJSON(ctx context.Context) (int, []byte) {
 // refresh collects fresh metrics and returns (jsonBytes, isHardFail).
 // isHardFail=true when ALL core collectors failed (no useful data).
 func (s *SystemService) refresh(ctx context.Context) ([]byte, bool) {
-	ver := s.getVersionsCached(ctx)
-
-	cpu := collectCPU(ctx)
-	ram := collectRAM(ctx)
-	swap := collectSwap(ctx)
-	disk := collectDiskRoot(s.cfg.DiskPath)
+	// Run versions + disk + CPU/RAM/Swap all in parallel for minimum wall-clock time.
+	var ver SystemVersions
+	var disk SystemDisk
+	var cpu SystemCPU
+	var ram SystemRAM
+	var swap SystemSwap
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() { defer wg.Done(); ver = s.getVersionsCached(ctx) }()
+	go func() { defer wg.Done(); disk = collectDiskRoot(s.cfg.DiskPath) }()
+	go func() {
+		defer wg.Done()
+		cpu, ram, swap = collectCPURAMSwapParallel(ctx)
+	}()
+	wg.Wait()
 
 	// Hard fail = all four core collectors failed
 	allFailed := cpu.Error != nil && ram.Error != nil && swap.Error != nil && disk.Error != nil
@@ -262,17 +269,4 @@ func runWithTimeout(ctx context.Context, timeoutMs int, name string, args ...str
 	return strings.TrimSpace(string(out)), err
 }
 
-// collectHostname returns the system hostname gracefully.
-func collectHostname() string {
-	h, err := os.Hostname()
-	if err != nil {
-		return "unknown"
-	}
-	return h
-}
 
-// hostOS returns runtime.GOOS.
-func hostOS() string { return runtime.GOOS }
-
-// hostArch returns runtime.GOARCH.
-func hostArch() string { return runtime.GOARCH }

@@ -144,12 +144,29 @@ def _collect_all() -> Optional[bytes]:
     versions = _get_versions_cached()
 
     degraded = bool(errors)
+
+    def _threshold(key: str, default_warn: float = 80, default_crit: float = 95) -> dict:
+        """Build threshold pair from per-metric config, falling back to global then defaults."""
+        per = _cfg.get(key, {})
+        gw = _cfg.get("warnPercent", default_warn)
+        gc = _cfg.get("criticalPercent", default_crit)
+        return {
+            "warn": per.get("warn", gw) or default_warn,
+            "critical": per.get("critical", gc) or default_crit,
+        }
+
     resp = {
         "ok": True,
         "degraded": degraded,
         "stale": False,
         "collectedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "pollSeconds": _cfg.get("pollSeconds", 5),
+        "thresholds": {
+            "cpu":  _threshold("cpu"),
+            "ram":  _threshold("ram"),
+            "swap": _threshold("swap"),
+            "disk": _threshold("disk"),
+        },
         "cpu": cpu,
         "ram": ram,
         "swap": swap,

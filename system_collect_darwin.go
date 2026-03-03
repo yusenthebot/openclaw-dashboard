@@ -10,10 +10,30 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+)
+
+// Pre-compiled regexes — compiled once at startup, not per-call.
+var (
+	reTopIdle    = regexp.MustCompile(`(\d+(?:\.\d+)?)%\s+idle`)    // P1-3: handles integer idle (e.g. "100% idle")
+	reVmPageSize = regexp.MustCompile(`page size of (\d+) bytes`)
+	reSwapUsage  = regexp.MustCompile(`total\s*=\s*([\d.]+)([MGT])\s+used\s*=\s*([\d.]+)([MGT])`)
+)
+
+func reVmPages(label string) *regexp.Regexp {
+	return regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(label) + `\s+(\d+)`)
+}
+
+// Pre-compile vm_stat page regexes once.
+var (
+	reVmActive     = reVmPages("Pages active:")
+	reVmWired      = reVmPages("Pages wired down:")
+	reVmCompressor = reVmPages("Pages occupied by compressor:")
 )
 
 func collectCPU(ctx context.Context) SystemCPU {
-	out, err := runWithTimeout(ctx, 3000, "/usr/bin/top", "-l", "1", "-n", "0", "-s", "0")
+	// Use -l 2 for accuracy: first sample is boot average; second is current delta.
+	out, err := runWithTimeout(ctx, 4000, "/usr/bin/top", "-l", "2", "-n", "0", "-s", "1")
 	if err != nil {
 		e := fmt.Sprintf("top failed: %v", err)
 		return SystemCPU{Cores: runtime.NumCPU(), Error: &e}
@@ -26,8 +46,9 @@ func collectCPU(ctx context.Context) SystemCPU {
 	return SystemCPU{Percent: pct, Cores: runtime.NumCPU()}
 }
 
+// collectRAM and collectSwap are independent — run them in parallel.
 func collectRAM(ctx context.Context) SystemRAM {
-	// total bytes — use full path, sysctl lives in /usr/sbin on macOS
+	// total bytes
 	totalOut, err := runWithTimeout(ctx, 2000, "/usr/sbin/sysctl", "-n", "hw.memsize")
 	if err != nil {
 		e := fmt.Sprintf("sysctl hw.memsize failed: %v", err)
@@ -75,37 +96,53 @@ func collectSwap(ctx context.Context) SystemSwap {
 	return SystemSwap{UsedBytes: used, TotalBytes: total, Percent: pct}
 }
 
-// parseTopCPU parses "CPU usage: 5.26% user, 10.52% sys, 84.21% idle" → 100 - idle.
+// collectCPURAMSwapParallel runs all three Darwin collectors concurrently.
+// Called by system_service.go refresh() instead of sequential calls.
+func collectCPURAMSwapParallel(ctx context.Context) (SystemCPU, SystemRAM, SystemSwap) {
+	var cpu SystemCPU
+	var ram SystemRAM
+	var swap SystemSwap
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() { defer wg.Done(); cpu = collectCPU(ctx) }()
+	go func() { defer wg.Done(); ram = collectRAM(ctx) }()
+	go func() { defer wg.Done(); swap = collectSwap(ctx) }()
+	wg.Wait()
+	return cpu, ram, swap
+}
+
+// parseTopCPU parses the LAST "CPU usage:" line from `top -l 2` output.
+// The last sample is the current-window delta (accurate); first is boot average.
+// P1-3: regex handles both "84.21% idle" and "100% idle".
 func parseTopCPU(output string) (float64, error) {
-	re := regexp.MustCompile(`(\d+\.\d+)%\s+idle`)
+	var lastMatch string
 	for _, line := range strings.Split(output, "\n") {
 		if strings.Contains(line, "CPU usage") {
-			m := re.FindStringSubmatch(line)
-			if m != nil {
-				idle, err := strconv.ParseFloat(m[1], 64)
-				if err != nil {
-					return 0, err
-				}
-				return math.Round((100-idle)*10) / 10, nil
+			if reTopIdle.MatchString(line) {
+				lastMatch = line
 			}
 		}
 	}
-	return 0, fmt.Errorf("CPU usage line not found in top output")
+	if lastMatch == "" {
+		return 0, fmt.Errorf("CPU usage line not found in top output")
+	}
+	m := reTopIdle.FindStringSubmatch(lastMatch)
+	idle, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return 0, err
+	}
+	return math.Round((100-idle)*10) / 10, nil
 }
 
 // parseVmStatUsed parses vm_stat output and returns used bytes (active+wired+compressed).
 func parseVmStatUsed(output string) (int64, error) {
 	pageSize := int64(4096)
-	// extract page size from header: "Mach Virtual Memory Statistics: (page size of 16384 bytes)"
-	rePage := regexp.MustCompile(`page size of (\d+) bytes`)
-	if m := rePage.FindStringSubmatch(output); m != nil {
+	if m := reVmPageSize.FindStringSubmatch(output); m != nil {
 		if ps, err := strconv.ParseInt(m[1], 10, 64); err == nil {
 			pageSize = ps
 		}
 	}
-
-	getPages := func(label string) int64 {
-		re := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(label) + `\s+(\d+)`)
+	getPages := func(re *regexp.Regexp) int64 {
 		m := re.FindStringSubmatch(output)
 		if m == nil {
 			return 0
@@ -113,10 +150,9 @@ func parseVmStatUsed(output string) (int64, error) {
 		v, _ := strconv.ParseInt(m[1], 10, 64)
 		return v
 	}
-
-	active := getPages("Pages active:")
-	wired := getPages("Pages wired down:")
-	compressed := getPages("Pages occupied by compressor:")
+	active := getPages(reVmActive)
+	wired := getPages(reVmWired)
+	compressed := getPages(reVmCompressor)
 	if active+wired+compressed == 0 {
 		return 0, fmt.Errorf("could not parse vm_stat pages")
 	}
@@ -125,8 +161,7 @@ func parseVmStatUsed(output string) (int64, error) {
 
 // parseSwapUsage parses "vm.swapusage: total = 4096.00M  used = 512.00M  free = 3584.00M"
 func parseSwapUsage(output string) (used int64, total int64, err error) {
-	re := regexp.MustCompile(`total\s*=\s*([\d.]+)([MGT])\s+used\s*=\s*([\d.]+)([MGT])`)
-	m := re.FindStringSubmatch(output)
+	m := reSwapUsage.FindStringSubmatch(output)
 	if m == nil {
 		return 0, 0, fmt.Errorf("could not parse vm.swapusage: %q", output)
 	}

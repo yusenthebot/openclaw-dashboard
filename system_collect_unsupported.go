@@ -22,3 +22,7 @@ func collectSwap(ctx context.Context) SystemSwap {
 	e := fmt.Sprintf("unsupported platform: %s", runtime.GOOS)
 	return SystemSwap{Error: &e}
 }
+
+func collectCPURAMSwapParallel(ctx context.Context) (SystemCPU, SystemRAM, SystemSwap) {
+	return collectCPU(ctx), collectRAM(ctx), collectSwap(ctx)
+}

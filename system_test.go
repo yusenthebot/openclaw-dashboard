@@ -2,8 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -121,32 +124,21 @@ func TestSystemConfig_ClampCriticalRelativeToWarn(t *testing.T) {
 		{95, 95, 100}, // edge — warn=95, critical=95 (<=warn) → 100
 	}
 	for _, tt := range tests {
-		cfg := defaultConfig()
-		cfg.System.WarnPercent = tt.warn
-		cfg.System.CriticalPercent = tt.critical
 		dir := t.TempDir()
-		loaded := loadConfig(dir) // triggers clamping
-		_ = loaded
-		// Test via direct clamp logic
-		w, c := tt.warn, tt.critical
-		if w <= 0 || w >= 100 {
-			w = 70
+		// Write config.json with the test thresholds so loadConfig picks them up.
+		cfgJSON := fmt.Sprintf(`{"system":{"warnPercent":%g,"criticalPercent":%g}}`, tt.warn, tt.critical)
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(cfgJSON), 0o644); err != nil {
+			t.Fatalf("write config: %v", err)
 		}
-		if c <= w || c > 100 {
-			if w < 95 {
-				c = w + 15
-				if c > 100 {
-					c = 100
-				}
-			} else {
-				c = 100
-			}
+		loaded := loadConfig(dir)
+		got := loaded.System.CriticalPercent
+		gotWarn := loaded.System.WarnPercent
+		if got != tt.wantCrit {
+			t.Errorf("warn=%.0f crit=%.0f: expected clamped critical=%.0f, loadConfig returned %.0f",
+				tt.warn, tt.critical, tt.wantCrit, got)
 		}
-		if c != tt.wantCrit {
-			t.Errorf("warn=%.0f crit=%.0f: expected clamped crit=%.0f got %.0f", tt.warn, tt.critical, tt.wantCrit, c)
-		}
-		if c <= w {
-			t.Errorf("invariant violated: critical(%.0f) <= warn(%.0f)", c, w)
+		if got <= gotWarn {
+			t.Errorf("invariant violated: critical(%.0f) <= warn(%.0f)", got, gotWarn)
 		}
 	}
 }

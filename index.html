@@ -1376,11 +1376,11 @@ const SystemBar = {
     const bar=$('systemTopBar'); if(!d){bar.style.display='none';return;}
     bar.style.display='flex';
     // Per-metric thresholds from API (fallback to global or defaults)
-    const th=d.thresholds||{};
-    const tCpu={w:th.cpu?.warn||80,c:th.cpu?.critical||95};
-    const tRam={w:th.ram?.warn||80,c:th.ram?.critical||95};
-    const tSwap={w:th.swap?.warn||80,c:th.swap?.critical||95};
-    const tDisk={w:th.disk?.warn||80,c:th.disk?.critical||95};
+    const th=d.thresholds??{};
+    const tCpu={w:th.cpu?.warn??80,c:th.cpu?.critical??95};
+    const tRam={w:th.ram?.warn??80,c:th.ram?.critical??95};
+    const tSwap={w:th.swap?.warn??80,c:th.swap?.critical??95};
+    const tDisk={w:th.disk?.warn??80,c:th.disk?.critical??95};
     const sp=(id,lbl,p,t,extra)=>{const e=$(id);e.className='sys-pill '+(p===null||p===undefined?'sys-err':this.cls(p,t.w,t.c));e.textContent=extra||(p!=null?lbl+' '+p.toFixed(1)+'%':lbl+' N/A');};
     const ramErr=d.ram?.error||d.ram?.totalBytes===0;
     const swapErr=d.swap?.error;

@@ -14,22 +14,13 @@ import (
 	"time"
 )
 
-var (
-	prevStatMu   sync.Mutex
-	prevUser     uint64
-	prevSystem   uint64
-	prevIdle     uint64
-	prevTotal    uint64
-	prevStatTime time.Time
-)
-
 func collectCPU(ctx context.Context) SystemCPU {
 	content1, err := os.ReadFile("/proc/stat")
 	if err != nil {
 		e := fmt.Sprintf("read /proc/stat: %v", err)
 		return SystemCPU{Cores: runtime.NumCPU(), Error: &e}
 	}
-	u1, s1, id1, tot1, err := parseProcStat(string(content1))
+	_, _, id1, tot1, err := parseProcStat(string(content1))
 	if err != nil {
 		e := err.Error()
 		return SystemCPU{Cores: runtime.NumCPU(), Error: &e}
@@ -42,22 +33,11 @@ func collectCPU(ctx context.Context) SystemCPU {
 		e := fmt.Sprintf("read /proc/stat second sample: %v", err)
 		return SystemCPU{Cores: runtime.NumCPU(), Error: &e}
 	}
-	u2, s2, id2, tot2, err := parseProcStat(string(content2))
+	_, _, id2, tot2, err := parseProcStat(string(content2))
 	if err != nil {
 		e := err.Error()
 		return SystemCPU{Cores: runtime.NumCPU(), Error: &e}
 	}
-
-	_ = u1
-	_ = s1
-	_ = u2
-	_ = s2
-	_ = prevStatMu
-	_ = prevUser
-	_ = prevSystem
-	_ = prevIdle
-	_ = prevTotal
-	_ = prevStatTime
 
 	dTotal := tot2 - tot1
 	dIdle := id2 - id1
@@ -68,19 +48,27 @@ func collectCPU(ctx context.Context) SystemCPU {
 	return SystemCPU{Percent: pct, Cores: runtime.NumCPU()}
 }
 
-func collectRAM(ctx context.Context) SystemRAM {
+// collectMeminfo reads /proc/meminfo once and returns parsed map — shared by RAM and Swap.
+func collectMeminfo() (map[string]uint64, error) {
 	content, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
-		e := fmt.Sprintf("read /proc/meminfo: %v", err)
-		return SystemRAM{Error: &e}
+		return nil, fmt.Errorf("read /proc/meminfo: %v", err)
 	}
-	info, err := parseProcMeminfo(string(content))
+	return parseProcMeminfo(string(content))
+}
+
+func collectRAM(ctx context.Context) SystemRAM {
+	info, err := collectMeminfo()
 	if err != nil {
 		e := err.Error()
 		return SystemRAM{Error: &e}
 	}
 	totalKb := info["MemTotal"]
-	availKb := info["MemAvailable"]
+	// P1-4: fallback to MemFree for kernels < 3.14 (no MemAvailable)
+	availKb, ok := info["MemAvailable"]
+	if !ok {
+		availKb = info["MemFree"]
+	}
 	usedKb := totalKb - availKb
 	totalBytes := int64(totalKb * 1024)
 	usedBytes := int64(usedKb * 1024)
@@ -92,12 +80,7 @@ func collectRAM(ctx context.Context) SystemRAM {
 }
 
 func collectSwap(ctx context.Context) SystemSwap {
-	content, err := os.ReadFile("/proc/meminfo")
-	if err != nil {
-		e := fmt.Sprintf("read /proc/meminfo: %v", err)
-		return SystemSwap{Error: &e}
-	}
-	info, err := parseProcMeminfo(string(content))
+	info, err := collectMeminfo()
 	if err != nil {
 		e := err.Error()
 		return SystemSwap{Error: &e}
@@ -112,6 +95,20 @@ func collectSwap(ctx context.Context) SystemSwap {
 		pct = math.Round(float64(usedBytes)/float64(totalBytes)*1000) / 10
 	}
 	return SystemSwap{UsedBytes: usedBytes, TotalBytes: totalBytes, Percent: pct}
+}
+
+// collectCPURAMSwapParallel runs all three Linux collectors concurrently.
+func collectCPURAMSwapParallel(ctx context.Context) (SystemCPU, SystemRAM, SystemSwap) {
+	var cpu SystemCPU
+	var ram SystemRAM
+	var swap SystemSwap
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() { defer wg.Done(); cpu = collectCPU(ctx) }()
+	go func() { defer wg.Done(); ram = collectRAM(ctx) }()
+	go func() { defer wg.Done(); swap = collectSwap(ctx) }()
+	wg.Wait()
+	return cpu, ram, swap
 }
 
 // parseProcMeminfo parses /proc/meminfo and returns a map of key→kB values.
