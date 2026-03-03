@@ -24,11 +24,12 @@ It's not trying to replace the OpenClaw CLI or Telegram interface. It's the at-a
 
 ## Features
 
-### 11 Dashboard Panels
+### 12 Dashboard Panels
 
-1. **🔔 Header Bar** — Bot name, online/offline status, auto-refresh countdown, theme picker
-2. **⚠️ Alerts Banner** — Smart alerts for high costs, failed crons, high context usage, gateway offline
-3. **💚 System Health** — Gateway status, PID, uptime, memory, compaction mode, active session count
+1. **📊 Top Metrics Bar** — Live CPU, RAM, swap, disk usage + OpenClaw version + gateway status — always visible, colour-coded by configurable thresholds
+2. **🔔 Header Bar** — Bot name, online/offline status, auto-refresh countdown, theme picker
+3. **⚠️ Alerts Banner** — Smart alerts for high costs, failed crons, high context usage, gateway offline
+4. **💚 System Health** — Gateway status, PID, uptime, memory, compaction mode, active session count
 4. **💰 Cost Cards** — Today's cost, all-time cost, projected monthly, cost breakdown donut chart
 5. **⏰ Cron Jobs** — All scheduled jobs with status, schedule, last/next run, duration, model
 6. **📡 Active Sessions** — Recent sessions with model, type badges (DM/group/cron/subagent), context %, tokens
@@ -37,6 +38,7 @@ It's not trying to replace the OpenClaw CLI or Telegram interface. It's the at-a
 9. **📈 Charts & Trends** — Cost trend line, model cost breakdown bars, sub-agent activity — all pure SVG, 7d/30d toggle
 10. **🧩 Bottom Row** — Available models grid, skills list, git log
 11. **💬 AI Chat** — Ask questions about your dashboard in natural language, powered by your OpenClaw gateway
+12. **📊 Top Metrics Bar** — Real-time host metrics always visible at the top (see [Top Metrics Bar](#top-metrics-bar))
 
 ### Key Features
 
@@ -48,6 +50,7 @@ It's not trying to replace the OpenClaw CLI or Telegram interface. It's the at-a
 - 🔒 **Local Only** — Runs on localhost, no external dependencies
 - 🐧 **Cross-Platform** — macOS and Linux
 - ⚡ **Zero Dependencies** — Pure HTML/CSS/JS frontend, Python stdlib backend, or single Go binary
+- 📊 **Top Metrics Bar** — Always-on CPU/RAM/swap/disk + gateway status bar with per-metric configurable thresholds
 - 💬 **AI Chat** — Natural language queries about costs, sessions, crons, and config via OpenClaw gateway
 - 🎯 **Accurate Model Display** — 5-level resolution chain ensures every session/sub-agent shows its real model, not the default
 
@@ -334,6 +337,63 @@ Edit `config.json`:
 | `ai.model` | `""` | Model to use for chat — any model ID registered in your OpenClaw gateway |
 | `ai.maxHistory` | `6` | Number of previous messages to include for context |
 | `ai.dotenvPath` | `"~/.openclaw/.env"` | Path to `.env` file containing `OPENCLAW_GATEWAY_TOKEN` |
+| `system.enabled` | `true` | Enable/disable the top metrics bar and `/api/system` endpoint |
+| `system.pollSeconds` | `10` | How often the browser polls `/api/system` (seconds, 2–60) |
+| `system.metricsTtlSeconds` | `10` | Server-side metrics cache TTL (seconds) |
+| `system.versionsTtlSeconds` | `300` | Version/gateway probe cache TTL (seconds) |
+| `system.gatewayTimeoutMs` | `1500` | Timeout for gateway liveness probe (ms) |
+| `system.diskPath` | `"/"` | Filesystem path to report disk usage for |
+| `system.warnPercent` | `70` | Global warn threshold (% used) — overridden by per-metric values |
+| `system.criticalPercent` | `85` | Global critical threshold (% used) — overridden by per-metric values |
+| `system.cpu.warn` | `80` | CPU warn threshold (%) |
+| `system.cpu.critical` | `95` | CPU critical threshold (%) |
+| `system.ram.warn` | `80` | RAM warn threshold (%) |
+| `system.ram.critical` | `95` | RAM critical threshold (%) |
+| `system.swap.warn` | `80` | Swap warn threshold (%) |
+| `system.swap.critical` | `95` | Swap critical threshold (%) |
+| `system.disk.warn` | `80` | Disk warn threshold (%) |
+| `system.disk.critical` | `95` | Disk critical threshold (%) |
+
+### Top Metrics Bar
+
+The top bar shows live host metrics — always visible above the alerts banner.
+
+**Metrics displayed:**
+| Pill | What it shows |
+|------|--------------|
+| CPU | Usage % (current delta, not boot average) |
+| RAM | Used / Total GB |
+| Swap | Usage % |
+| Disk | Used / Total GB (used %) |
+| OpenClaw | Installed version |
+| GW | Gateway status (online / offline) |
+
+**Colour coding:**
+- 🟢 Green — below warn threshold
+- 🟡 Yellow — above warn, below critical
+- 🔴 Red — above critical threshold
+- ⚫ Grey — collection error / N/A
+
+**Per-metric config example (`config.json`):**
+```json
+"system": {
+  "enabled": true,
+  "pollSeconds": 10,
+  "diskPath": "/",
+  "cpu":  { "warn": 80, "critical": 95 },
+  "ram":  { "warn": 75, "critical": 90 },
+  "swap": { "warn": 60, "critical": 80 },
+  "disk": { "warn": 85, "critical": 95 }
+}
+```
+
+**Platform support:**
+- **macOS** — CPU via `top -l 2` (current delta), RAM via `vm_stat`, Swap via `sysctl vm.swapusage`, Disk via `statfs`
+- **Linux** — CPU via `/proc/stat` (200ms dual-sample including steal field), RAM+Swap via `/proc/meminfo` (single read, shared), Disk via `statfs`
+
+**API endpoint:** `GET /api/system` — returns JSON with all metrics, thresholds, and version info. Includes stale-serving semantics (returns cached data immediately while refreshing in background).
+
+---
 
 ### AI Chat Setup
 
