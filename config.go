@@ -42,15 +42,27 @@ type AlertsConfig struct {
 	MemoryMb      float64 `json:"memoryMb"`
 }
 
+// MetricThreshold holds per-metric warn/critical percent thresholds.
+type MetricThreshold struct {
+	Warn     float64 `json:"warn"`
+	Critical float64 `json:"critical"`
+}
+
 type SystemConfig struct {
-	Enabled            bool    `json:"enabled"`
-	PollSeconds        int     `json:"pollSeconds"`
-	MetricsTTLSeconds  int     `json:"metricsTtlSeconds"`
-	VersionsTTLSeconds int     `json:"versionsTtlSeconds"`
-	GatewayTimeoutMs   int     `json:"gatewayTimeoutMs"`
-	DiskPath           string  `json:"diskPath"`
-	WarnPercent        float64 `json:"warnPercent"`
-	CriticalPercent    float64 `json:"criticalPercent"`
+	Enabled            bool            `json:"enabled"`
+	PollSeconds        int             `json:"pollSeconds"`
+	MetricsTTLSeconds  int             `json:"metricsTtlSeconds"`
+	VersionsTTLSeconds int             `json:"versionsTtlSeconds"`
+	GatewayTimeoutMs   int             `json:"gatewayTimeoutMs"`
+	DiskPath           string          `json:"diskPath"`
+	// Global fallback thresholds (used when per-metric thresholds are zero/unset)
+	WarnPercent        float64         `json:"warnPercent"`
+	CriticalPercent    float64         `json:"criticalPercent"`
+	// Per-metric thresholds — override global when set
+	CPU                MetricThreshold `json:"cpu"`
+	RAM                MetricThreshold `json:"ram"`
+	Swap               MetricThreshold `json:"swap"`
+	Disk               MetricThreshold `json:"disk"`
 }
 
 type Config struct {
@@ -94,6 +106,10 @@ func defaultConfig() Config {
 			DiskPath:           "/",
 			WarnPercent:        70,
 			CriticalPercent:    85,
+			CPU:                MetricThreshold{Warn: 80, Critical: 95},
+			RAM:                MetricThreshold{Warn: 80, Critical: 95},
+			Swap:               MetricThreshold{Warn: 80, Critical: 95},
+			Disk:               MetricThreshold{Warn: 80, Critical: 95},
 		},
 	}
 }
@@ -155,6 +171,26 @@ func loadConfig(dir string) Config {
 			cfg.System.CriticalPercent = 100
 		}
 	}
+	// Clamp per-metric thresholds; fall back to global if unset
+	clampThreshold := func(t *MetricThreshold, globalWarn, globalCrit float64) {
+		if t.Warn <= 0 || t.Warn >= 100 {
+			t.Warn = globalWarn
+		}
+		if t.Critical <= t.Warn || t.Critical > 100 {
+			if t.Warn < 95 {
+				t.Critical = t.Warn + 15
+				if t.Critical > 100 {
+					t.Critical = 100
+				}
+			} else {
+				t.Critical = 100
+			}
+		}
+	}
+	clampThreshold(&cfg.System.CPU, cfg.System.WarnPercent, cfg.System.CriticalPercent)
+	clampThreshold(&cfg.System.RAM, cfg.System.WarnPercent, cfg.System.CriticalPercent)
+	clampThreshold(&cfg.System.Swap, cfg.System.WarnPercent, cfg.System.CriticalPercent)
+	clampThreshold(&cfg.System.Disk, cfg.System.WarnPercent, cfg.System.CriticalPercent)
 	return cfg
 }
 

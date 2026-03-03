@@ -103,16 +103,20 @@ func (s *SystemService) refresh(ctx context.Context) ([]byte, bool) {
 	allFailed := cpu.Error != nil && ram.Error != nil && swap.Error != nil && disk.Error != nil
 
 	resp := SystemResponse{
-		OK:              !allFailed,
-		CollectedAt:     time.Now().UTC().Format(time.RFC3339),
-		PollSeconds:     s.cfg.PollSeconds,
-		WarnPercent:     s.cfg.WarnPercent,
-		CriticalPercent: s.cfg.CriticalPercent,
-		CPU:             cpu,
-		RAM:             ram,
-		Swap:            swap,
-		Disk:            disk,
-		Versions:        ver,
+		OK:          !allFailed,
+		CollectedAt: time.Now().UTC().Format(time.RFC3339),
+		PollSeconds: s.cfg.PollSeconds,
+		Thresholds: SystemThresholds{
+			CPU:  ThresholdPair{Warn: s.cfg.CPU.Warn, Critical: s.cfg.CPU.Critical},
+			RAM:  ThresholdPair{Warn: s.cfg.RAM.Warn, Critical: s.cfg.RAM.Critical},
+			Swap: ThresholdPair{Warn: s.cfg.Swap.Warn, Critical: s.cfg.Swap.Critical},
+			Disk: ThresholdPair{Warn: s.cfg.Disk.Warn, Critical: s.cfg.Disk.Critical},
+		},
+		CPU:      cpu,
+		RAM:      ram,
+		Swap:     swap,
+		Disk:     disk,
+		Versions: ver,
 	}
 
 	if cpu.Error != nil {

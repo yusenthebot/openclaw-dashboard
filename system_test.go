@@ -83,8 +83,8 @@ func TestHandleSystem_Disabled_Returns503(t *testing.T) {
 func TestHandleSystem_ThresholdsInResponse(t *testing.T) {
 	dir := t.TempDir()
 	cfg := defaultConfig()
-	cfg.System.WarnPercent = 60
-	cfg.System.CriticalPercent = 80
+	cfg.System.CPU = MetricThreshold{Warn: 60, Critical: 80}
+	cfg.System.RAM = MetricThreshold{Warn: 60, Critical: 80}
 	srv := testServerWithConfig(t, dir, cfg)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/system", nil)
@@ -98,11 +98,14 @@ func TestHandleSystem_ThresholdsInResponse(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	if resp.WarnPercent != 60 {
-		t.Errorf("expected warnPercent=60 got %f", resp.WarnPercent)
+	if resp.Thresholds.CPU.Warn != 60 {
+		t.Errorf("expected thresholds.cpu.warn=60 got %f", resp.Thresholds.CPU.Warn)
 	}
-	if resp.CriticalPercent != 80 {
-		t.Errorf("expected criticalPercent=80 got %f", resp.CriticalPercent)
+	if resp.Thresholds.CPU.Critical != 80 {
+		t.Errorf("expected thresholds.cpu.critical=80 got %f", resp.Thresholds.CPU.Critical)
+	}
+	if resp.Thresholds.RAM.Warn != 60 {
+		t.Errorf("expected thresholds.ram.warn=60 got %f", resp.Thresholds.RAM.Warn)
 	}
 }
 

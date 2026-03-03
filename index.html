@@ -1375,14 +1375,19 @@ const SystemBar = {
   render(d) {
     const bar=$('systemTopBar'); if(!d){bar.style.display='none';return;}
     bar.style.display='flex';
-    const w=d.warnPercent||70, c=d.criticalPercent||85;
-    const sp=(id,lbl,p,extra)=>{const e=$(id);e.className='sys-pill '+(p===null||p===undefined?'sys-err':this.cls(p,w,c));e.textContent=extra||(p!=null?lbl+' '+p.toFixed(1)+'%':lbl+' N/A');};
+    // Per-metric thresholds from API (fallback to global or defaults)
+    const th=d.thresholds||{};
+    const tCpu={w:th.cpu?.warn||80,c:th.cpu?.critical||95};
+    const tRam={w:th.ram?.warn||80,c:th.ram?.critical||95};
+    const tSwap={w:th.swap?.warn||80,c:th.swap?.critical||95};
+    const tDisk={w:th.disk?.warn||80,c:th.disk?.critical||95};
+    const sp=(id,lbl,p,t,extra)=>{const e=$(id);e.className='sys-pill '+(p===null||p===undefined?'sys-err':this.cls(p,t.w,t.c));e.textContent=extra||(p!=null?lbl+' '+p.toFixed(1)+'%':lbl+' N/A');};
     const ramErr=d.ram?.error||d.ram?.totalBytes===0;
     const swapErr=d.swap?.error;
-    sp('sysCpu','CPU',d.cpu?.error?null:(d.cpu?.percent??null));
-    sp('sysRam','RAM',ramErr?null:(d.ram?.percent??null),!ramErr&&d.ram?'RAM '+this.fmt(d.ram.usedBytes)+'/'+this.fmt(d.ram.totalBytes):null);
-    sp('sysSwap','Swap',swapErr?null:(d.swap?.percent??null));
-    sp('sysDisk','Disk used',d.disk?.error?null:(d.disk?.percent??null));
+    sp('sysCpu','CPU',d.cpu?.error?null:(d.cpu?.percent??null),tCpu);
+    sp('sysRam','RAM',ramErr?null:(d.ram?.percent??null),tRam,!ramErr&&d.ram?.totalBytes>0?'RAM '+this.fmt(d.ram.usedBytes)+'/'+this.fmt(d.ram.totalBytes):null);
+    sp('sysSwap','Swap',swapErr?null:(d.swap?.percent??null),tSwap);
+    sp('sysDisk','Disk',d.disk?.error?null:(d.disk?.percent??null),tDisk,d.disk?.totalBytes>0?'Disk used '+this.fmt(d.disk.usedBytes)+'/'+this.fmt(d.disk.totalBytes)+' ('+d.disk.percent.toFixed(1)+'%)':null);
     const oc=$('sysOclaw');oc.className='sys-pill sys-ok';oc.textContent='OpenClaw '+(d.versions?.openclaw||'?');
     const gw=$('sysGw');const gwok=['online','running'].includes(d.versions?.gateway?.status);
     gw.className='sys-pill '+(gwok?'sys-ok':'sys-err');gw.textContent='GW '+(d.versions?.gateway?.status||'?');
