@@ -85,12 +85,14 @@ def get_payload() -> tuple[int, bytes]:
 
     if has_stale:
         # Return stale immediately; trigger background refresh if not already running
+        should_start = False
         if not refreshing:
             with _ms.lock:
                 if not _ms.refreshing:
                     _ms.refreshing = True
-            t = threading.Thread(target=_bg_refresh, daemon=True)
-            t.start()
+                    should_start = True
+        if should_start:
+            threading.Thread(target=_bg_refresh, daemon=True).start()
         # Inject stale flag
         try:
             data = json.loads(payload)
@@ -149,13 +151,20 @@ def _collect_all() -> Optional[bytes]:
 
     def _threshold(key: str, default_warn: float = 80, default_crit: float = 95) -> dict:
         """Return per-metric thresholds: per-metric config → per-metric defaults (80/95).
-        Global warnPercent/criticalPercent is NOT used as fallback to keep defaults sane."""
+        Global warnPercent/criticalPercent is NOT used as fallback to keep defaults sane.
+        Clamp to valid values: 1 <= warn <= 99 and warn < critical <= 100."""
         per = _cfg.get(key, {})
-        w = per.get("warn") if isinstance(per, dict) else None
-        c = per.get("critical") if isinstance(per, dict) else None
+        w = float(per.get("warn") or default_warn) if isinstance(per, dict) else default_warn
+        c = float(per.get("critical") or default_crit) if isinstance(per, dict) else default_crit
+
+        w = max(1.0, min(99.0, w))
+        c = max(1.0, min(100.0, c))
+        if c <= w:
+            c = min(100.0, w + 15.0)
+
         return {
-            "warn": float(w) if w else default_warn,
-            "critical": float(c) if c else default_crit,
+            "warn": w,
+            "critical": c,
         }
 
     resp = {
@@ -366,7 +375,8 @@ def _collect_versions() -> dict:
     except Exception:
         pass
 
-    # Gateway status — probe via HTTP HEAD (faster, no PATH issues, reliable)
+    # Gateway status — probe via HTTP HEAD only.
+    # openclaw CLI responsiveness does NOT imply gateway daemon health.
     gw = {"version": "", "status": "unknown", "error": None}
     try:
         gw_port = _cfg.get("gatewayPort", 18789)
@@ -374,18 +384,9 @@ def _collect_versions() -> dict:
         req = _ur.Request(f"http://127.0.0.1:{gw_port}/", method="HEAD")
         with _ur.urlopen(req, timeout=timeout_s) as resp:
             gw["status"] = "online" if resp.status < 500 else "offline"
-    except Exception:
-        # HTTP probe failed — try openclaw CLI as last resort (may be slow)
-        try:
-            r = subprocess.run([oc_bin, "--version"], capture_output=True, text=True, timeout=min(timeout_s, 2.0))
-            # If openclaw binary responds, gateway is likely running
-            if r.returncode == 0:
-                gw["status"] = "online"
-            else:
-                gw["status"] = "offline"
-        except Exception as e2:
-            gw["status"] = "offline"
-            gw["error"] = str(e2)
+    except Exception as e:
+        gw["status"] = "offline"
+        gw["error"] = str(e)
 
     return {
         "dashboard": _dashboard_version,

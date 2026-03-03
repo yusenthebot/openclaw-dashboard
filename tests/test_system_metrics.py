@@ -101,14 +101,13 @@ class TestDiskCollector(unittest.TestCase):
 
 class TestCache(unittest.TestCase):
 
-    def setUp(self):
-        # Reset cache state before each test
+    def _reset_state(self):
         import system_metrics as sm
-        sm._metrics_payload = None
-        sm._metrics_at = 0.0
-        sm._metrics_refreshing = False
-        sm._versions_cache = None
-        sm._versions_at = 0.0
+        sm._ms.payload = None
+        sm._ms.at = 0.0
+        sm._ms.refreshing = False
+        sm._vs.cache = None
+        sm._vs.at = 0.0
         sm._cfg = {
             "enabled": True,
             "pollSeconds": 5,
@@ -119,6 +118,14 @@ class TestCache(unittest.TestCase):
             "warnPercent": 70,
             "criticalPercent": 85,
         }
+
+    def setUp(self):
+        # Reset cache state before each test
+        self._reset_state()
+
+    def tearDown(self):
+        # Keep tests isolated if one mutates module state unexpectedly
+        self._reset_state()
 
     def test_cache_returns_same_within_ttl(self):
         status1, body1 = system_metrics.get_payload()
@@ -133,7 +140,7 @@ class TestCache(unittest.TestCase):
         status1, body1 = system_metrics.get_payload()
         time.sleep(0.05)
         # Force cache expiry
-        sm._metrics_at = 0
+        sm._ms.at = 0
         status2, body2 = system_metrics.get_payload()
         self.assertEqual(status1, 200)
         self.assertEqual(status2, 200)
