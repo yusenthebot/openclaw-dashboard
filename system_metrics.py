@@ -206,8 +206,8 @@ def _collect_cpu(sys_name: str) -> dict:
 
 def _collect_cpu_darwin() -> dict:
     result = subprocess.run(
-        ["top", "-l", "1", "-n", "0", "-s", "0"],
-        capture_output=True, text=True, timeout=4
+        ["/usr/bin/top", "-l", "2", "-n", "0", "-s", "1"],
+        capture_output=True, text=True, timeout=6
     )
     return parse_top_cpu(result.stdout, os.cpu_count() or 1)
 
@@ -257,9 +257,9 @@ def _collect_ram(sys_name: str) -> dict:
 
 
 def _collect_ram_darwin() -> dict:
-    r = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, timeout=2)
+    r = subprocess.run(["/usr/sbin/sysctl", "-n", "hw.memsize"], capture_output=True, text=True, timeout=2)
     total = int(r.stdout.strip())
-    vm = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=2)
+    vm = subprocess.run(["/usr/bin/vm_stat"], capture_output=True, text=True, timeout=2)
     return parse_vm_stat(vm.stdout, total)
 
 
@@ -281,7 +281,7 @@ def _collect_ram_linux() -> dict:
 def _collect_swap(sys_name: str) -> dict:
     try:
         if sys_name == "darwin":
-            r = subprocess.run(["sysctl", "vm.swapusage"], capture_output=True, text=True, timeout=2)
+            r = subprocess.run(["/usr/sbin/sysctl", "vm.swapusage"], capture_output=True, text=True, timeout=2)
             return parse_swap_usage_darwin(r.stdout)
         elif sys_name == "linux":
             with open("/proc/meminfo") as f:
@@ -397,14 +397,19 @@ def _collect_versions() -> dict:
 # ── Parsers (exported for unit tests) ─────────────────────────────────────
 
 def parse_top_cpu(output: str, cores: int = 1) -> dict:
-    """Parse macOS `top -l 1 -n 0` output → cpu dict."""
+    """Parse macOS `top -l 2` output → cpu dict.
+    Uses the LAST CPU usage line (current delta, not boot average).
+    Handles both '84.21% idle' and '100% idle' (integer idle)."""
+    last_match = None
     for line in output.splitlines():
         if "CPU usage" in line or "cpu usage" in line.lower():
-            m = re.search(r"([\d.]+)%\s*idle", line, re.IGNORECASE)
+            m = re.search(r"(\d+(?:\.\d+)?)%\s*idle", line, re.IGNORECASE)
             if m:
-                idle = float(m.group(1))
-                pct = round(100 - idle, 1)
-                return {"percent": pct, "cores": cores, "error": None}
+                last_match = m
+    if last_match:
+        idle = float(last_match.group(1))
+        pct = round(100 - idle, 1)
+        return {"percent": pct, "cores": cores, "error": None}
     return {"percent": 0.0, "cores": cores, "error": "CPU usage line not found in top output"}
 
 
