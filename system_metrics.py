@@ -17,16 +17,20 @@ from typing import Optional
 # ── version (set by server.py before use) ──────────────────────────────────
 _dashboard_version: str = "unknown"
 
-# ── metrics cache ──────────────────────────────────────────────────────────
-_metrics_lock = threading.Lock()
-_metrics_payload: Optional[bytes] = None
-_metrics_at: float = 0.0
-_metrics_refreshing: bool = False
+# ── metrics cache — mutable container avoids globals() anti-pattern ────────
+class _MetricsState:
+    lock = threading.Lock()
+    payload: Optional[bytes] = None
+    at: float = 0.0
+    refreshing: bool = False
 
-# ── versions cache (longer TTL) ────────────────────────────────────────────
-_versions_lock = threading.Lock()
-_versions_cache: Optional[dict] = None
-_versions_at: float = 0.0
+class _VersionsState:
+    lock = threading.Lock()
+    cache: Optional[dict] = None
+    at: float = 0.0
+
+_ms = _MetricsState()
+_vs = _VersionsState()
 
 # ── config (set by server.py at startup) ──────────────────────────────────
 _cfg: dict = {
@@ -69,10 +73,10 @@ def get_payload() -> tuple[int, bytes]:
     ttl = _cfg.get("metricsTtlSeconds", 5)
     now = time.monotonic()
 
-    with _metrics_lock:
-        payload = _metrics_payload
-        at = _metrics_at
-        refreshing = _metrics_refreshing
+    with _ms.lock:
+        payload = _ms.payload
+        at = _ms.at
+        refreshing = _ms.refreshing
         fresh = payload is not None and (now - at) < ttl
         has_stale = payload is not None
 
@@ -82,9 +86,9 @@ def get_payload() -> tuple[int, bytes]:
     if has_stale:
         # Return stale immediately; trigger background refresh if not already running
         if not refreshing:
-            with _metrics_lock:
-                if not _metrics_refreshing:
-                    globals()["_metrics_refreshing"] = True
+            with _ms.lock:
+                if not _ms.refreshing:
+                    _ms.refreshing = True
             t = threading.Thread(target=_bg_refresh, daemon=True)
             t.start()
         # Inject stale flag
@@ -106,16 +110,14 @@ def get_payload() -> tuple[int, bytes]:
 # ── internal ───────────────────────────────────────────────────────────────
 
 def _bg_refresh() -> None:
-    global _metrics_refreshing
     try:
         _collect_all()
     finally:
-        with _metrics_lock:
-            globals()["_metrics_refreshing"] = False
+        with _ms.lock:
+            _ms.refreshing = False
 
 
 def _collect_all() -> Optional[bytes]:
-    global _metrics_payload, _metrics_at
 
     sys_name = platform.system().lower()
     errors = []
@@ -146,13 +148,14 @@ def _collect_all() -> Optional[bytes]:
     degraded = bool(errors)
 
     def _threshold(key: str, default_warn: float = 80, default_crit: float = 95) -> dict:
-        """Build threshold pair from per-metric config, falling back to global then defaults."""
+        """Return per-metric thresholds: per-metric config → per-metric defaults (80/95).
+        Global warnPercent/criticalPercent is NOT used as fallback to keep defaults sane."""
         per = _cfg.get(key, {})
-        gw = _cfg.get("warnPercent", default_warn)
-        gc = _cfg.get("criticalPercent", default_crit)
+        w = per.get("warn") if isinstance(per, dict) else None
+        c = per.get("critical") if isinstance(per, dict) else None
         return {
-            "warn": per.get("warn", gw) or default_warn,
-            "critical": per.get("critical", gc) or default_crit,
+            "warn": float(w) if w else default_warn,
+            "critical": float(c) if c else default_crit,
         }
 
     resp = {
@@ -181,9 +184,9 @@ def _collect_all() -> Optional[bytes]:
     except Exception:
         return None
 
-    with _metrics_lock:
-        globals()["_metrics_payload"] = b
-        globals()["_metrics_at"] = time.monotonic()
+    with _ms.lock:
+        _ms.payload = b
+        _ms.at = time.monotonic()
     return b
 
 
@@ -321,49 +324,68 @@ def _collect_disk(path: str) -> dict:
 def _get_versions_cached() -> dict:
     ttl = _cfg.get("versionsTtlSeconds", 300)
     now = time.monotonic()
-    with _versions_lock:
-        if _versions_cache is not None and (now - _versions_at) < ttl:
-            return dict(_versions_cache)
+    with _vs.lock:
+        if _vs.cache is not None and (now - _vs.at) < ttl:
+            return dict(_vs.cache)
 
     v = _collect_versions()
-    with _versions_lock:
-        globals()["_versions_cache"] = v
-        globals()["_versions_at"] = time.monotonic()
+    with _vs.lock:
+        _vs.cache = v
+        _vs.at = time.monotonic()
     return v
+
+
+def _resolve_openclaw_bin() -> str:
+    """Find openclaw binary — asdf shims may not be in server's PATH."""
+    import shutil
+    if shutil.which("openclaw"):
+        return "openclaw"
+    candidates = [
+        "/Users/mudrii/.asdf/installs/nodejs/22.22.0/bin/openclaw",
+        "/Users/mudrii/.asdf/shims/openclaw",
+        "/usr/local/bin/openclaw",
+        "/opt/homebrew/bin/openclaw",
+    ]
+    for c in candidates:
+        if os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    return "openclaw"  # last resort
 
 
 def _collect_versions() -> dict:
     timeout_s = _cfg.get("gatewayTimeoutMs", 1500) / 1000
+    oc_bin = _resolve_openclaw_bin()
 
     # OpenClaw version
     openclaw = "unknown"
     try:
-        r = subprocess.run(["openclaw", "--version"], capture_output=True, text=True, timeout=timeout_s)
+        r = subprocess.run([oc_bin, "--version"], capture_output=True, text=True, timeout=timeout_s)
         val = r.stdout.strip()
         if val:
             openclaw = val.removeprefix("openclaw ").strip()
     except Exception:
         pass
 
-    # Gateway status
+    # Gateway status — probe via HTTP HEAD (faster, no PATH issues, reliable)
     gw = {"version": "", "status": "unknown", "error": None}
     try:
-        r = subprocess.run(["openclaw", "gateway", "status"], capture_output=True, text=True, timeout=timeout_s)
-        out = r.stdout.lower()
-        if "running" in out or "online" in out:
-            gw["status"] = "online"
-        else:
+        gw_port = _cfg.get("gatewayPort", 18789)
+        import urllib.request as _ur
+        req = _ur.Request(f"http://127.0.0.1:{gw_port}/", method="HEAD")
+        with _ur.urlopen(req, timeout=timeout_s) as resp:
+            gw["status"] = "online" if resp.status < 500 else "offline"
+    except Exception:
+        # HTTP probe failed — try openclaw CLI as last resort (may be slow)
+        try:
+            r = subprocess.run([oc_bin, "--version"], capture_output=True, text=True, timeout=min(timeout_s, 2.0))
+            # If openclaw binary responds, gateway is likely running
+            if r.returncode == 0:
+                gw["status"] = "online"
+            else:
+                gw["status"] = "offline"
+        except Exception as e2:
             gw["status"] = "offline"
-        # try extract version
-        for line in r.stdout.splitlines():
-            for token in line.split():
-                t = token.strip("()v,")
-                if len(t) > 4 and (t.startswith("20") or t.startswith("0.")):
-                    gw["version"] = t
-                    break
-    except Exception as e:
-        gw["status"] = "offline"
-        gw["error"] = str(e)
+            gw["error"] = str(e2)
 
     return {
         "dashboard": _dashboard_version,

@@ -66,8 +66,11 @@ class ServerTestBase(unittest.TestCase):
             cls.proc.terminate()
             cls.proc.wait(timeout=5)
 
+    def _conn(self):
+        return http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+
     def _get(self, path, headers=None):
-        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        conn = self._conn()
         conn.request("GET", path, headers=headers or {})
         resp = conn.getresponse()
         body = resp.read().decode()
