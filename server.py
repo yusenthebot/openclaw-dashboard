@@ -322,8 +322,12 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_error(404, "Not Found")
 
     def do_HEAD(self):
-        if self.path in ("/api/system", "/api/system/"):
+        if self.path in ("/", "/index.html"):
+            self.handle_index(head_only=True)
+        elif self.path in ("/api/system", "/api/system/"):
             self.handle_system(head_only=True)
+        elif self.path == "/api/refresh" or self.path.startswith("/api/refresh?"):
+            self.handle_refresh(head_only=True)
         else:
             clean = self.path.split("?")[0].rstrip("/")
             ALLOWED_STATIC = {
@@ -351,7 +355,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         if not head_only:
             self.wfile.write(body)
 
-    def handle_index(self):
+    def handle_index(self, head_only=False):
         """Serve index.html with theme preset and version injected."""
         index_path = os.path.join(DIR, "index.html")
         try:
@@ -371,7 +375,8 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            if not head_only:
+                self.wfile.write(body)
         except FileNotFoundError:
             self.send_response(404)
             self.end_headers()
@@ -383,22 +388,25 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-    def handle_refresh(self):
+    def handle_refresh(self, head_only=False):
         run_refresh()
 
         try:
             with open(DATA_FILE, "r") as f:
                 data = f.read()
+            body = data.encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", str(len(body)))
             origin = self.headers.get("Origin", "")
             if origin.startswith("http://localhost:") or origin.startswith("http://127.0.0.1:"):
                 self.send_header("Access-Control-Allow-Origin", origin)
             else:
                 self.send_header("Access-Control-Allow-Origin", "http://localhost:8080")
             self.end_headers()
-            self.wfile.write(data.encode())
+            if not head_only:
+                self.wfile.write(body)
         except FileNotFoundError:
             self.send_response(503)
             self.send_header("Content-Type", "application/json")
