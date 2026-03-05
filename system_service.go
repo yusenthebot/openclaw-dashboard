@@ -232,6 +232,10 @@ func collectVersions(ctx context.Context, dashVer string, timeoutMs int, gateway
 		gw = parseGatewayStatusJSON(ctx, gwOut)
 	}
 	v.Gateway = gw
+
+	// Latest version from npm registry (best-effort, non-blocking)
+	v.Latest = fetchLatestNpmVersion(ctx, timeoutMs)
+
 	return v
 }
 
@@ -390,6 +394,36 @@ func resolveOpenclawBin() string {
 		}
 	}
 	return "openclaw" // last resort — may fail but gives a clear error
+}
+
+// fetchLatestNpmVersion queries the npm registry for the latest openclaw version.
+// Best-effort: returns "" on any error.
+func fetchLatestNpmVersion(ctx context.Context, timeoutMs int) string {
+	timeout := time.Duration(timeoutMs) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 3 * time.Second
+	}
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://registry.npmjs.org/openclaw/latest", nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pkg); err != nil {
+		return ""
+	}
+	return pkg.Version
 }
 
 

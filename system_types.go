@@ -70,5 +70,6 @@ type SystemGateway struct {
 type SystemVersions struct {
 	Dashboard string        `json:"dashboard"`
 	Openclaw  string        `json:"openclaw"`
+	Latest    string        `json:"latest,omitempty"`
 	Gateway   SystemGateway `json:"gateway"`
 }
