@@ -172,7 +172,7 @@ func (s *SystemService) getVersionsCached(ctx context.Context) SystemVersions {
 	}
 	s.verMu.RUnlock()
 
-	// Singleflight: only one goroutine collects versions at a time
+	// Double-checked lock: reduces redundant collections (not strict singleflight)
 	s.verMu.Lock()
 	// Re-check after acquiring write lock (another goroutine may have refreshed)
 	if s.verAt != (time.Time{}) && time.Since(s.verAt) < ttl {
