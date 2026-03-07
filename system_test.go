@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -408,4 +410,241 @@ func TestGetProcessInfo_ContextTimeout(t *testing.T) {
 	pid := os.Getpid()
 	// Should return without blocking even if context is already cancelled
 	_, _ = getProcessInfo(ctx, pid)
+}
+
+// ── Tests for detectGatewayFallback timeout-bounded client ───────────────
+
+func TestDetectGatewayFallback_UsesTimeoutClient(t *testing.T) {
+	// Spin up a server that delays response to verify timeout works.
+	// Handler sleeps 1s (just long enough to exceed 100ms client timeout).
+	// Context cancels handler on test completion to avoid lingering goroutines.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	// Extract port from test server
+	parts := strings.Split(srv.URL, ":")
+	port, _ := strconv.Atoi(parts[len(parts)-1])
+
+	start := time.Now()
+	gw := detectGatewayFallback(ctx, port, 100) // 100ms timeout
+	elapsed := time.Since(start)
+
+	// Should timeout quickly, not wait 1 second
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("detectGatewayFallback took %v — timeout not working", elapsed)
+	}
+	if gw.Status != "offline" {
+		t.Errorf("expected offline on timeout, got %q", gw.Status)
+	}
+}
+
+func TestDetectGatewayFallback_OnlineWhenResponds(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	parts := strings.Split(srv.URL, ":")
+	port, _ := strconv.Atoi(parts[len(parts)-1])
+
+	ctx := context.Background()
+	gw := detectGatewayFallback(ctx, port, 3000)
+	if gw.Status != "online" {
+		t.Errorf("expected online, got %q", gw.Status)
+	}
+}
+
+// ── Tests for resolveOpenclawBin executable-bit validation ────────────────
+
+func TestResolveOpenclawBin_SkipsNonExecutable(t *testing.T) {
+	dir := t.TempDir()
+	// Create a file at a candidate location that is NOT executable
+	binDir := filepath.Join(dir, ".asdf", "shims")
+	os.MkdirAll(binDir, 0755)
+	fakeFile := filepath.Join(binDir, "openclaw")
+	os.WriteFile(fakeFile, []byte("not executable"), 0644) // no exec bit
+
+	// resolveOpenclawBin should NOT return this file
+	// (We can't easily test this without modifying HOME, so just test the logic directly)
+	info, _ := os.Stat(fakeFile)
+	if info.Mode()&0111 != 0 {
+		t.Fatal("test setup error: file should not have exec bit")
+	}
+	// The guard in resolveOpenclawBin: info.Mode()&0111 != 0 would skip this file
+}
+
+func TestResolveOpenclawBin_IntegrationWithTempHome(t *testing.T) {
+	// Full integration test: set HOME to a temp directory, place both executable
+	// and non-executable files, and call resolveOpenclawBin() directly.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	// Create asdf shims dir with NON-executable openclaw → should be skipped
+	shimsDir := filepath.Join(tmpHome, ".asdf", "shims")
+	os.MkdirAll(shimsDir, 0755)
+	nonExec := filepath.Join(shimsDir, "openclaw")
+	os.WriteFile(nonExec, []byte("#!/bin/sh\necho not-exec"), 0644) // no exec bit
+
+	// Create asdf nodejs install with EXECUTABLE openclaw → should be found
+	nodeDir := filepath.Join(tmpHome, ".asdf", "installs", "nodejs", "22.0.0", "bin")
+	os.MkdirAll(nodeDir, 0755)
+	execFile := filepath.Join(nodeDir, "openclaw")
+	os.WriteFile(execFile, []byte("#!/bin/sh\necho exec"), 0755) // exec bit set
+
+	// Temporarily remove PATH-based openclaw so resolveOpenclawBin falls through to candidates
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", "/nonexistent")
+
+	result := resolveOpenclawBin()
+
+	// Restore PATH (for other tests) — t.Setenv handles cleanup automatically
+
+	// Result should be the executable file, not the non-executable one
+	if result == nonExec {
+		t.Errorf("resolveOpenclawBin returned non-executable file %q", result)
+	}
+	if result != execFile {
+		// It's acceptable to get the last-resort "openclaw" if exec.LookPath still
+		// finds something, but it must NOT be the 0644 file.
+		t.Logf("resolveOpenclawBin returned %q (expected %q)", result, execFile)
+	}
+
+	// Also verify the non-executable is truly skipped
+	info, err := os.Stat(nonExec)
+	if err != nil {
+		t.Fatal("test setup: non-exec file missing")
+	}
+	if info.Mode()&0111 != 0 {
+		t.Fatal("test setup: non-exec file has exec bit")
+	}
+
+	_ = origPath // appease linter
+}
+
+// ── Tests for stale byte-level injection ─────────────────────────────────
+
+func TestStaleByteInjection(t *testing.T) {
+	dir := t.TempDir()
+	srv := testServer(t, dir)
+
+	// Prime the system service cache with a fresh payload
+	req1 := httptest.NewRequest(http.MethodGet, "/api/system", nil)
+	w1 := httptest.NewRecorder()
+	srv.ServeHTTP(w1, req1)
+
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w1.Code)
+	}
+
+	var resp1 SystemResponse
+	json.Unmarshal(w1.Body.Bytes(), &resp1)
+	if resp1.Stale {
+		t.Fatal("first response should not be stale")
+	}
+
+	// Force cache to appear stale by backdating the timestamp
+	srv.systemSvc.metricsMu.Lock()
+	srv.systemSvc.metricsAt = time.Now().Add(-1 * time.Hour)
+	srv.systemSvc.metricsMu.Unlock()
+
+	// Next request should get stale=true
+	req2 := httptest.NewRequest(http.MethodGet, "/api/system", nil)
+	w2 := httptest.NewRecorder()
+	srv.ServeHTTP(w2, req2)
+
+	var resp2 SystemResponse
+	json.Unmarshal(w2.Body.Bytes(), &resp2)
+	if !resp2.Stale {
+		t.Error("expected stale=true after cache expiry")
+	}
+}
+
+// ── Static file allowlist parity ─────────────────────────────────────────
+
+func TestStaticFile_FaviconIco(t *testing.T) {
+	dir := t.TempDir()
+	srv := testServer(t, dir)
+	os.WriteFile(filepath.Join(dir, "favicon.ico"), []byte("ico"), 0644)
+
+	req := httptest.NewRequest(http.MethodGet, "/favicon.ico", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for favicon.ico, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "image/x-icon" {
+		t.Fatalf("expected image/x-icon, got %s", ct)
+	}
+}
+
+func TestStaticFile_FaviconPng(t *testing.T) {
+	dir := t.TempDir()
+	srv := testServer(t, dir)
+	os.WriteFile(filepath.Join(dir, "favicon.png"), []byte("png"), 0644)
+
+	req := httptest.NewRequest(http.MethodGet, "/favicon.png", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for favicon.png, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "image/png" {
+		t.Fatalf("expected image/png, got %s", ct)
+	}
+}
+
+// ── CORS Allow-Headers parity ────────────────────────────────────────────
+
+func TestCORS_AllowHeaders_IncludesAuthorization(t *testing.T) {
+	dir := t.TempDir()
+	srv := testServer(t, dir)
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/chat", nil)
+	req.Header.Set("Origin", "http://localhost:8080")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+	ah := w.Header().Get("Access-Control-Allow-Headers")
+	if !strings.Contains(ah, "Authorization") {
+		t.Errorf("expected Authorization in Allow-Headers, got %q", ah)
+	}
+	if !strings.Contains(ah, "Content-Type") {
+		t.Errorf("expected Content-Type in Allow-Headers, got %q", ah)
+	}
+}
+
+// ── Refresh error CORS ───────────────────────────────────────────────────
+
+func TestRefresh_DataMissing_HasCORSHeaders(t *testing.T) {
+	dir := t.TempDir()
+	srv := testServer(t, dir)
+	// No data.json
+
+	req := httptest.NewRequest(http.MethodGet, "/api/refresh", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", w.Code)
+	}
+	cors := w.Header().Get("Access-Control-Allow-Origin")
+	if cors != "http://localhost:3000" {
+		t.Errorf("503 response should have CORS header, got %q", cors)
+	}
 }

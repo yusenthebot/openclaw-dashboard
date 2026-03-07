@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net/http"
@@ -20,21 +22,23 @@ import (
 
 // SystemService collects host metrics and versions with TTL caching.
 type SystemService struct {
-	cfg     SystemConfig
-	dashVer string
+	cfg       SystemConfig
+	dashVer   string
+	serverCtx context.Context // lifecycle context — cancelled on graceful shutdown
 
 	metricsMu      sync.RWMutex
 	metricsPayload []byte
 	metricsAt      time.Time
 	metricsRefresh bool
 
-	verMu     sync.RWMutex
-	verCached SystemVersions
-	verAt     time.Time
+	verMu      sync.RWMutex
+	verCached  SystemVersions
+	verAt      time.Time
+	verRefresh bool // true while a goroutine is collecting versions
 }
 
-func NewSystemService(cfg SystemConfig, dashVer string) *SystemService {
-	return &SystemService{cfg: cfg, dashVer: dashVer}
+func NewSystemService(cfg SystemConfig, dashVer string, serverCtx context.Context) *SystemService {
+	return &SystemService{cfg: cfg, dashVer: dashVer, serverCtx: serverCtx}
 }
 
 // GetJSON returns (statusCode, jsonBody).
@@ -61,7 +65,7 @@ func (s *SystemService) GetJSON(ctx context.Context) (int, []byte) {
 		if !s.metricsRefresh {
 			s.metricsRefresh = true
 			go func() {
-				data, hardFail := s.refresh(context.Background())
+				data, hardFail := s.refresh(s.serverCtx)
 				if data == nil || hardFail {
 					log.Printf("[system] background refresh failed: data=%v hardFail=%v", data == nil, hardFail)
 				}
@@ -73,15 +77,9 @@ func (s *SystemService) GetJSON(ctx context.Context) (int, []byte) {
 		b := s.metricsPayload
 		s.metricsMu.Unlock()
 
-		// Mark stale in response
-		var resp SystemResponse
-		if err := json.Unmarshal(b, &resp); err == nil {
-			resp.Stale = true
-			if out, err := json.Marshal(resp); err == nil {
-				return http.StatusOK, out
-			}
-		}
-		return http.StatusOK, b
+		// Mark stale in response — byte-level replacement avoids unmarshal/remarshal overhead
+		staleBytes := bytes.Replace(b, []byte(`"stale":false`), []byte(`"stale":true`), 1)
+		return http.StatusOK, staleBytes
 	}
 
 	// No cache — collect synchronously
@@ -172,7 +170,7 @@ func (s *SystemService) getVersionsCached(ctx context.Context) SystemVersions {
 	}
 	s.verMu.RUnlock()
 
-	// Double-checked lock: reduces redundant collections (not strict singleflight)
+	// Double-checked lock with refresh flag to prevent thundering herd
 	s.verMu.Lock()
 	// Re-check after acquiring write lock (another goroutine may have refreshed)
 	if s.verAt != (time.Time{}) && time.Since(s.verAt) < ttl {
@@ -180,12 +178,20 @@ func (s *SystemService) getVersionsCached(ctx context.Context) SystemVersions {
 		s.verMu.Unlock()
 		return v
 	}
+	// If another goroutine is already refreshing, return stale
+	if s.verRefresh {
+		v := s.verCached
+		s.verMu.Unlock()
+		return v
+	}
+	s.verRefresh = true
 	s.verMu.Unlock()
 
 	v := collectVersions(ctx, s.dashVer, s.cfg.GatewayTimeoutMs, s.cfg.GatewayPort)
 	s.verMu.Lock()
 	s.verCached = v
 	s.verAt = time.Now()
+	s.verRefresh = false
 	s.verMu.Unlock()
 	return v
 }
@@ -337,7 +343,8 @@ func detectGatewayFallback(ctx context.Context, gatewayPort int, timeoutMs int) 
 		e := "probe failed"
 		return SystemGateway{Status: "offline", Error: &e}
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: time.Duration(timeoutMs) * time.Millisecond}
+	resp, err := client.Do(req)
 	if err == nil {
 		resp.Body.Close()
 		return SystemGateway{Status: "online"}
@@ -389,7 +396,7 @@ func resolveOpenclawBin() string {
 		"/opt/homebrew/bin/openclaw",
 	)
 	for _, c := range candidates {
-		if info, err := os.Stat(c); err == nil && !info.IsDir() {
+		if info, err := os.Stat(c); err == nil && !info.IsDir() && info.Mode()&0111 != 0 {
 			return c
 		}
 	}
@@ -420,7 +427,7 @@ func fetchLatestNpmVersion(ctx context.Context, timeoutMs int) string {
 	var pkg struct {
 		Version string `json:"version"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&pkg); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&pkg); err != nil {
 		return ""
 	}
 	return pkg.Version

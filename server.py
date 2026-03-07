@@ -5,8 +5,10 @@ import argparse
 import functools
 import http.server
 import json
+import logging
 import os
 import socket
+import socketserver
 import subprocess
 import threading
 import time
@@ -14,6 +16,8 @@ import sys
 import urllib.request
 import urllib.error
 import system_metrics
+
+_log = logging.getLogger("dashboard")
 
 PORT = 8080
 BIND = "127.0.0.1"
@@ -46,11 +50,82 @@ REFRESH_SCRIPT = os.path.join(DIR, "refresh.sh")
 DATA_FILE = os.path.join(DIR, "data.json")
 REFRESH_TIMEOUT = 15
 
+# Pre-rendered index.html — computed at startup, re-rendered when config.json changes.
+# Uses mtime-based invalidation: checks config.json mtime on each request,
+# re-renders only if the file was modified (like Go's data cache pattern).
+_rendered_index = None
+_rendered_index_config_mtime = 0.0
+
+
+def _render_index():
+    """Pre-render index.html with theme preset and version injected."""
+    import html as _html_mod
+    index_path = os.path.join(DIR, "index.html")
+    try:
+        with open(index_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except FileNotFoundError:
+        return None
+    preset = load_config().get("theme", {}).get("preset", "midnight")
+    safe_preset = _html_mod.escape(preset, quote=True)
+    content = content.replace(
+        "<head>",
+        f'<head>\n<meta name="oc-theme" content="{safe_preset}">',
+        1,
+    )
+    content = content.replace("__VERSION__", _html_mod.escape(VERSION, quote=True))
+    return content.encode("utf-8")
+
+
+def _get_rendered_index():
+    """Return pre-rendered index.html, re-rendering if config.json changed.
+
+    Checks config.json mtime on each call — lightweight stat() avoids
+    serving stale theme after config edits (no server restart needed).
+    """
+    global _rendered_index, _rendered_index_config_mtime
+    try:
+        mtime = os.path.getmtime(CONFIG_FILE)
+    except OSError:
+        mtime = 0.0
+    if _rendered_index is not None and mtime <= _rendered_index_config_mtime:
+        return _rendered_index
+    _rendered_index = _render_index()
+    _rendered_index_config_mtime = mtime
+    return _rendered_index
+
+
 _last_refresh = 0
 _refresh_lock = threading.Lock()
 _debounce_sec = 30
 _ai_cfg = {}
 _gateway_token = ""
+
+# ── Chat rate limiter (10 req/min per IP) ──────────────────────────────────
+_CHAT_RATE_LIMIT = 10       # max requests per window
+_CHAT_RATE_WINDOW = 60.0    # window in seconds
+_chat_rate_lock = threading.Lock()
+_chat_rate_buckets: dict = {}  # ip → [tokens_remaining, last_reset_time]
+
+
+def _chat_rate_allow(ip: str) -> bool:
+    """Check if IP is within chat rate limit. Returns True if allowed."""
+    now = time.time()
+    with _chat_rate_lock:
+        bucket = _chat_rate_buckets.get(ip)
+        if bucket is None or (now - bucket[1]) >= _CHAT_RATE_WINDOW:
+            _chat_rate_buckets[ip] = [_CHAT_RATE_LIMIT - 1, now]
+            return True
+        if bucket[0] <= 0:
+            return False
+        bucket[0] -= 1
+        return True
+
+# data.json mtime-based cache — parity with Go's getDataCached()
+_data_cache_lock = threading.Lock()
+_data_cache_mtime = 0.0
+_data_cache_parsed = None
+_data_cache_raw = None
 
 
 OPENCLAW_PATH = os.path.expanduser("~/.openclaw")
@@ -148,6 +223,42 @@ def get_session_model(session_key, session_file=None):
     return _load_agent_default_models().get(agent_name, "unknown")
 
 
+def _get_data_cached():
+    """Return parsed data.json with mtime-based caching — parity with Go's getDataCached().
+
+    Uses intentional double-checked locking: the file is read *outside* the lock
+    (between two ``with _data_cache_lock`` blocks).  Two threads may both decide
+    to read simultaneously — this is harmless because both read the same file and
+    the last writer wins.  The worst case is one redundant file read, which is
+    cheaper than holding the lock during disk I/O.  Matches Go's getDataCached()
+    pattern.
+    """
+    global _data_cache_mtime, _data_cache_parsed, _data_cache_raw
+    try:
+        mtime = os.path.getmtime(DATA_FILE)
+    except OSError:
+        return {}
+
+    with _data_cache_lock:
+        if _data_cache_parsed is not None and mtime <= _data_cache_mtime:
+            return _data_cache_parsed
+
+    # File read outside lock — intentional; see docstring above.
+    try:
+        with open(DATA_FILE, "r") as f:
+            raw = f.read()
+        parsed = json.loads(raw)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+    with _data_cache_lock:
+        if _data_cache_parsed is None or mtime > _data_cache_mtime:
+            _data_cache_parsed = parsed
+            _data_cache_raw = raw.encode()
+            _data_cache_mtime = mtime
+        return _data_cache_parsed
+
+
 def load_config():
     """Load config.json, return empty dict on failure."""
     try:
@@ -169,7 +280,11 @@ def read_dotenv(path):
                     continue
                 if "=" in line:
                     key, _, value = line.partition("=")
-                    result[key.strip()] = value.strip()
+                    value = value.strip()
+                    # Strip surrounding quotes (parity with Go readDotenv)
+                    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                        value = value[1:-1]
+                    result[key.strip()] = value
     except (FileNotFoundError, PermissionError):
         pass
     return result
@@ -243,10 +358,17 @@ def build_dashboard_prompt(data):
     return "\n".join(lines)
 
 
+MAX_GATEWAY_RESP = 1 << 20  # 1MB — parity with Go's maxGatewayResp
+
+
 def call_gateway(system, history, question, port, token, model):
     """Call the OpenClaw gateway's OpenAI-compatible chat completions endpoint.
 
-    Returns {"answer": "..."} on success, {"error": "..."} on failure.
+    Returns (http_status, result_dict):
+      - (200, {"answer": "..."}) on success
+      - (502, {"error": "..."}) on gateway failure (unreachable, HTTP error, parse error)
+      - (504, {"error": "..."}) on timeout
+    Matches Go's handleChat behavior: proper HTTP status codes instead of always 200.
     """
     messages = [{"role": "system", "content": system}]
     messages.extend(history)
@@ -271,22 +393,25 @@ def call_gateway(system, history, question, port, token, model):
 
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
-            body = json.loads(resp.read().decode())
+            raw = resp.read(MAX_GATEWAY_RESP + 1)
+            if len(raw) > MAX_GATEWAY_RESP:
+                return 502, {"error": f"Gateway response too large (>{MAX_GATEWAY_RESP} bytes)"}
+            body = json.loads(raw.decode())
             content = (
                 body.get("choices", [{}])[0]
                     .get("message", {})
                     .get("content", "")
             )
-            return {"answer": content or "(empty response)"}
+            return 200, {"answer": content or "(empty response)"}
     except urllib.error.HTTPError as e:
         body = e.read().decode()
-        return {"error": f"Gateway HTTP {e.code}: {body[:200]}"}
+        return 502, {"error": f"Gateway HTTP {e.code}: {body[:200]}"}
     except urllib.error.URLError as e:
-        return {"error": f"Gateway unreachable: {e.reason}"}
+        return 502, {"error": f"Gateway unreachable: {e.reason}"}
     except socket.timeout:
-        return {"error": "Gateway timed out — model took too long to respond"}
+        return 504, {"error": "Gateway timed out — model took too long to respond"}
     except Exception as e:
-        return {"error": f"Unexpected error: {e}"}
+        return 502, {"error": f"Unexpected error: {e}"}
 
 
 class DashboardHandler(http.server.SimpleHTTPRequestHandler):
@@ -311,12 +436,14 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         else:
             # Allowlist static files — never serve arbitrary repo files
             clean = self.path.split("?")[0].rstrip("/")
+            if ".." in clean:
+                self.send_error(403, "Forbidden")
+                return
+            # Strict allowlist — parity with Go server (no broad extension matching)
             ALLOWED_STATIC = {
                 "/themes.json", "/favicon.ico", "/favicon.png",
-                "/config.json",  # user-facing dashboard config, not server config
             }
-            ALLOWED_EXT = {".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2"}
-            if clean in ALLOWED_STATIC or any(clean.endswith(ext) for ext in ALLOWED_EXT):
+            if clean in ALLOWED_STATIC:
                 super().do_GET()
             else:
                 self.send_error(404, "Not Found")
@@ -330,11 +457,13 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_refresh(head_only=True)
         else:
             clean = self.path.split("?")[0].rstrip("/")
+            if ".." in clean:
+                self.send_error(403, "Forbidden")
+                return
             ALLOWED_STATIC = {
-                "/themes.json", "/favicon.ico", "/favicon.png", "/config.json",
+                "/themes.json", "/favicon.ico", "/favicon.png",
             }
-            ALLOWED_EXT = {".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2"}
-            if clean in ALLOWED_STATIC or any(clean.endswith(ext) for ext in ALLOWED_EXT):
+            if clean in ALLOWED_STATIC:
                 super().do_HEAD()
             else:
                 self.send_error(404, "Not Found")
@@ -356,30 +485,18 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(body)
 
     def handle_index(self, head_only=False):
-        """Serve index.html with theme preset and version injected."""
-        index_path = os.path.join(DIR, "index.html")
-        try:
-            with open(index_path, "r", encoding="utf-8") as f:
-                html = f.read()
-            import html as _html_mod
-            preset = load_config().get("theme", {}).get("preset", "midnight")
-            safe_preset = _html_mod.escape(preset, quote=True)
-            html = html.replace(
-                "<head>",
-                f'<head>\n<meta name="oc-theme" content="{safe_preset}">',
-                1,
-            )
-            html = html.replace("__VERSION__", _html_mod.escape(VERSION, quote=True))
-            body = html.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            if not head_only:
-                self.wfile.write(body)
-        except FileNotFoundError:
+        """Serve pre-rendered index.html with theme and version injected."""
+        body = _get_rendered_index()
+        if body is None:
             self.send_response(404)
             self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if not head_only:
+            self.wfile.write(body)
 
     def do_OPTIONS(self):
         """CORS preflight handler — mirrors Go server behavior."""
@@ -422,17 +539,30 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             if not head_only:
                 self.wfile.write(body)
         except FileNotFoundError:
-            body = json.dumps({"error": "data.json not found"}).encode()
+            body = json.dumps({"error": "data.json not found — refresh in progress, try again shortly"}).encode()
             self.send_response(503)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-cache")
+            origin = self.headers.get("Origin", "")
+            if origin.startswith("http://localhost:") or origin.startswith("http://127.0.0.1:"):
+                self.send_header("Access-Control-Allow-Origin", origin)
+            else:
+                self.send_header("Access-Control-Allow-Origin", "http://localhost:8080")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             if not head_only:
                 self.wfile.write(body)
         except Exception as e:
-            body = json.dumps({"error": str(e)}).encode()
+            _log.exception("refresh error: %s", e)
+            body = json.dumps({"error": "failed to read dashboard data"}).encode()
             self.send_response(500)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-cache")
+            origin = self.headers.get("Origin", "")
+            if origin.startswith("http://localhost:") or origin.startswith("http://127.0.0.1:"):
+                self.send_header("Access-Control-Allow-Origin", origin)
+            else:
+                self.send_header("Access-Control-Allow-Origin", "http://localhost:8080")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             if not head_only:
@@ -448,8 +578,25 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json(503, {"error": "AI chat is disabled in config.json"})
             return
 
+        # Rate limit: 10 req/min per IP
+        client_ip = self.client_address[0] if self.client_address else "unknown"
+        if not _chat_rate_allow(client_ip):
+            self.send_response(429)
+            self.send_header("Retry-After", "60")
+            body = json.dumps({"error": "Rate limit exceeded — max 10 requests per minute"}).encode()
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         length = int(self.headers.get("Content-Length", 0))
         if length > self._MAX_BODY:
+            # Drain body to prevent HTTP/1.1 framing corruption on keep-alive
+            try:
+                self.rfile.read(length)
+            except Exception:
+                pass
             self._send_json(413, {"error": f"Request body too large (max {self._MAX_BODY} bytes)"})
             return
         try:
@@ -485,14 +632,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             })
         history = safe_history
 
-        try:
-            with open(DATA_FILE, "r") as f:
-                data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            data = {}
+        data = _get_data_cached()
 
         system_prompt = build_dashboard_prompt(data)
-        result = call_gateway(
+        status, result = call_gateway(
             system=system_prompt,
             history=history,
             question=question,
@@ -500,7 +643,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             token=_gateway_token,
             model=_ai_cfg.get("model", ""),
         )
-        status = 502 if "error" in result else 200
         self._send_json(status, result)
 
     def _send_json(self, status, data):
@@ -575,7 +717,15 @@ def run_refresh():
             return False
 
 
+class ThreadingDashboardServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    """Multi-threaded HTTP server — prevents refresh.sh from blocking all requests."""
+    daemon_threads = True
+
+
 def main():
+    global _rendered_index
+    _rendered_index = _render_index()
+
     cfg = load_config()
     server_cfg = cfg.get("server", {})
     refresh_cfg = cfg.get("refresh", {})
@@ -634,7 +784,7 @@ examples:
     )
     args = parser.parse_args()
 
-    server = http.server.HTTPServer((args.bind, args.port), DashboardHandler)
+    server = ThreadingDashboardServer((args.bind, args.port), DashboardHandler)
     server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     print(f"[dashboard] v{VERSION}")
     print(f"[dashboard] Serving on http://{args.bind}:{args.port}/")

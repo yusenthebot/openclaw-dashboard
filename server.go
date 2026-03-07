@@ -18,23 +18,80 @@ import (
 )
 
 const (
-	maxBodyBytes   = 64 * 1024
-	maxQuestionLen = 2000
-	maxHistoryItem = 4000
-	maxGatewayResp = 1 << 20 // 1MB limit on gateway response
-	refreshTimeout = 15 * time.Second
+	maxBodyBytes      = 64 * 1024
+	maxQuestionLen    = 2000
+	maxHistoryItem    = 4000
+	maxGatewayResp    = 1 << 20 // 1MB limit on gateway response
+	refreshTimeout    = 15 * time.Second
+	chatRateLimit     = 10             // max requests per minute per IP
+	chatRateWindow    = 1 * time.Minute
+	chatRateCleanupInterval = 5 * time.Minute
 )
 
 // Pre-defined error JSON responses — avoid map alloc + marshal on hot paths
 var (
-	errChatDisabled = []byte(`{"error":"AI chat is disabled in config.json"}`)
-	errBadBody      = []byte(`{"error":"failed to read body"}`)
-	errBadJSON      = []byte(`{"error":"Invalid JSON body"}`)
-	errEmptyQ       = []byte(`{"error":"question is required and must be non-empty"}`)
-	errBodyTooLarge = []byte(`{"error":"Request body too large (max 65536 bytes)"}`)
-	errQTooLong     = []byte(`{"error":"Question too long (max 2000 chars)"}`)
-	errDataMissing  = []byte(`{"error":"data.json not found — refresh in progress, try again shortly"}`)
+	errChatDisabled  = []byte(`{"error":"AI chat is disabled in config.json"}`)
+	errBadBody       = []byte(`{"error":"failed to read body"}`)
+	errBadJSON       = []byte(`{"error":"Invalid JSON body"}`)
+	errEmptyQ        = []byte(`{"error":"question is required and must be non-empty"}`)
+	errBodyTooLarge  = []byte(`{"error":"Request body too large (max 65536 bytes)"}`)
+	errQTooLong      = []byte(`{"error":"Question too long (max 2000 chars)"}`)
+	errDataMissing   = []byte(`{"error":"data.json not found — refresh in progress, try again shortly"}`)
+	errChatRateLimit = []byte(`{"error":"Rate limit exceeded — max 10 requests per minute"}`)
 )
+
+// chatRateLimiter implements a simple per-IP token-bucket rate limiter for /api/chat.
+// Uses sync.Map for lock-free reads on the hot path.
+type chatRateLimiter struct {
+	// entries maps IP → *rateBucket
+	entries sync.Map
+}
+
+type rateBucket struct {
+	mu        sync.Mutex
+	tokens    int
+	lastReset time.Time
+}
+
+// allow checks if the given IP is within rate limit. Returns true if allowed.
+func (rl *chatRateLimiter) allow(ip string) bool {
+	now := time.Now()
+	val, _ := rl.entries.LoadOrStore(ip, &rateBucket{
+		tokens:    chatRateLimit,
+		lastReset: now,
+	})
+	bucket := val.(*rateBucket)
+
+	bucket.mu.Lock()
+	defer bucket.mu.Unlock()
+
+	// Reset tokens if window has elapsed
+	if now.Sub(bucket.lastReset) >= chatRateWindow {
+		bucket.tokens = chatRateLimit
+		bucket.lastReset = now
+	}
+
+	if bucket.tokens <= 0 {
+		return false
+	}
+	bucket.tokens--
+	return true
+}
+
+// cleanup removes stale entries older than 2x the rate window.
+func (rl *chatRateLimiter) cleanup() {
+	cutoff := time.Now().Add(-2 * chatRateWindow)
+	rl.entries.Range(func(key, val any) bool {
+		bucket := val.(*rateBucket)
+		bucket.mu.Lock()
+		stale := bucket.lastReset.Before(cutoff)
+		bucket.mu.Unlock()
+		if stale {
+			rl.entries.Delete(key)
+		}
+		return true
+	})
+}
 
 type Server struct {
 	dir          string
@@ -59,16 +116,19 @@ type Server struct {
 
 	// System metrics service
 	systemSvc *SystemService
+
+	// Chat rate limiter (10 req/min per IP)
+	chatLimiter chatRateLimiter
 }
 
-func NewServer(dir, version string, cfg Config, gatewayToken string, indexHTML []byte) *Server {
+func NewServer(dir, version string, cfg Config, gatewayToken string, indexHTML []byte, serverCtx context.Context) *Server {
 	content := string(indexHTML)
 	preset := html.EscapeString(cfg.Theme.Preset)
 	meta := "<head>\n<meta name=\"oc-theme\" content=\"" + preset + "\">"
 	content = strings.Replace(content, "<head>", meta, 1)
 	content = strings.ReplaceAll(content, "__VERSION__", html.EscapeString(version))
 	rendered := []byte(content)
-	return &Server{
+	s := &Server{
 		dir:                dir,
 		version:            version,
 		cfg:                cfg,
@@ -77,8 +137,22 @@ func NewServer(dir, version string, cfg Config, gatewayToken string, indexHTML [
 		indexContentLength: strconv.Itoa(len(rendered)),
 		corsDefault:        "http://localhost:" + strconv.Itoa(cfg.Server.Port),
 		httpClient:         &http.Client{Timeout: 60 * time.Second},
-		systemSvc:          NewSystemService(cfg.System, version),
+		systemSvc:          NewSystemService(cfg.System, version, serverCtx),
 	}
+	// Start periodic cleanup of stale rate-limit entries
+	go func() {
+		ticker := time.NewTicker(chatRateCleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.chatLimiter.cleanup()
+			case <-serverCtx.Done():
+				return
+			}
+		}
+	}()
+	return s
 }
 
 // PreWarm runs refresh.sh once in the background at startup so data.json
@@ -95,7 +169,9 @@ func (s *Server) PreWarm() {
 // This is intentionally restrictive — Python serves everything (including
 // .git/config, server.py, config.json) which is a security risk.
 var allowedStatic = map[string]string{
-	"/themes.json": "application/json",
+	"/themes.json":  "application/json",
+	"/favicon.ico":  "image/x-icon",
+	"/favicon.png":  "image/png",
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +188,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodOptions:
 		s.setCORSHeaders(w, r)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Max-Age", "86400")
 		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodPost && r.URL.Path == "/api/chat":
@@ -211,36 +287,52 @@ func (s *Server) runRefresh() {
 	s.mu.Unlock()
 }
 
-// getDataRawCached returns cached data.json bytes when unchanged.
-func (s *Server) getDataRawCached() ([]byte, error) {
+// loadData reads data.json with mtime-based caching, filling both raw bytes and
+// parsed map atomically under one lock acquisition.  Merges the old
+// getDataRawCached/getDataCached into a single cache layer to eliminate
+// double-read on concurrent requests.
+func (s *Server) loadData() ([]byte, map[string]any, error) {
 	dataPath := filepath.Join(s.dir, "data.json")
 	stat, err := os.Stat(dataPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	mtime := stat.ModTime()
 
 	s.dataMu.RLock()
-	if s.cachedDataRaw != nil && !mtime.After(s.cachedDataMtime) {
-		raw := s.cachedDataRaw
+	if s.cachedDataRaw != nil && s.cachedData != nil && !mtime.After(s.cachedDataMtime) {
+		raw, parsed := s.cachedDataRaw, s.cachedData
 		s.dataMu.RUnlock()
-		return raw, nil
+		return raw, parsed, nil
 	}
 	s.dataMu.RUnlock()
 
 	raw, err := os.ReadFile(dataPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return raw, nil, err
 	}
 
 	s.dataMu.Lock()
-	if s.cachedDataRaw == nil || mtime.After(s.cachedDataMtime) {
+	// Double-check: another goroutine may have updated while we read/parsed
+	if s.cachedDataRaw != nil && s.cachedData != nil && !mtime.After(s.cachedDataMtime) {
+		raw, parsed = s.cachedDataRaw, s.cachedData
+	} else {
 		s.cachedDataRaw = raw
+		s.cachedData = parsed
 		s.cachedDataMtime = mtime
-		s.cachedData = nil // invalidate parsed cache to prevent stale reads
 	}
 	s.dataMu.Unlock()
-	return raw, nil
+	return raw, parsed, nil
+}
+
+// getDataRawCached returns cached data.json bytes — delegates to loadData().
+func (s *Server) getDataRawCached() ([]byte, error) {
+	raw, _, err := s.loadData()
+	return raw, err
 }
 
 // handleRefresh implements stale-while-revalidate:
@@ -261,7 +353,7 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		if os.IsNotExist(err) {
 			s.sendJSONRaw(w, r, http.StatusServiceUnavailable, errDataMissing)
 		} else {
-			s.sendJSON(w, r, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			s.sendJSON(w, r, http.StatusInternalServerError, map[string]string{"error": "failed to read dashboard data"})
 		}
 		return
 	}
@@ -277,37 +369,12 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// getDataCached returns parsed data.json, cached by file mtime.
-// Avoids re-reading and re-parsing ~100KB JSON on every /api/chat.
+// getDataCached returns parsed data.json — delegates to loadData().
 func (s *Server) getDataCached() map[string]any {
-	dataPath := filepath.Join(s.dir, "data.json")
-	stat, err := os.Stat(dataPath)
-	if err != nil {
+	_, parsed, err := s.loadData()
+	if err != nil || parsed == nil {
 		return map[string]any{}
 	}
-	mtime := stat.ModTime()
-
-	s.dataMu.RLock()
-	if s.cachedData != nil && !mtime.After(s.cachedDataMtime) {
-		defer s.dataMu.RUnlock()
-		return s.cachedData
-	}
-	s.dataMu.RUnlock()
-
-	raw, err := os.ReadFile(dataPath)
-	if err != nil {
-		return map[string]any{}
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return map[string]any{}
-	}
-
-	s.dataMu.Lock()
-	s.cachedData = parsed
-	s.cachedDataMtime = mtime
-	s.cachedDataRaw = raw
-	s.dataMu.Unlock()
 	return parsed
 }
 
@@ -315,6 +382,17 @@ func (s *Server) getDataCached() map[string]any {
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if !s.cfg.AI.Enabled {
 		s.sendJSONRaw(w, r, http.StatusServiceUnavailable, errChatDisabled)
+		return
+	}
+
+	// Rate limit: 10 req/min per IP
+	ip := r.RemoteAddr
+	if idx := strings.LastIndex(ip, ":"); idx >= 0 {
+		ip = ip[:idx]
+	}
+	if !s.chatLimiter.allow(ip) {
+		w.Header().Set("Retry-After", "60")
+		s.sendJSONRaw(w, r, http.StatusTooManyRequests, errChatRateLimit)
 		return
 	}
 
@@ -379,7 +457,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	systemPrompt := buildSystemPrompt(dashData)
 	answer, err := callGateway(
-		systemPrompt, history, q,
+		r.Context(), systemPrompt, history, q,
 		s.cfg.AI.GatewayPort,
 		s.gatewayToken,
 		s.cfg.AI.Model,
@@ -387,7 +465,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		log.Printf("[dashboard] POST /api/chat error: %v", err)
-		s.sendJSON(w, r, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.sendJSON(w, r, http.StatusBadGateway, map[string]string{"error": "gateway request failed"})
 		return
 	}
 
