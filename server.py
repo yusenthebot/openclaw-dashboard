@@ -25,7 +25,15 @@ DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _detect_version():
-    """Derive version from git tag. Falls back to VERSION file, then 'dev'."""
+    """Derive version from VERSION file first, then git tag, then 'dev'."""
+    version_file = os.path.join(DIR, "VERSION")
+    try:
+        with open(version_file, "r") as f:
+            value = f.read().strip()
+            if value:
+                return value.lstrip("v")
+    except FileNotFoundError:
+        pass
     try:
         result = subprocess.run(
             ["git", "describe", "--tags", "--abbrev=0"],
@@ -34,12 +42,6 @@ def _detect_version():
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip().lstrip("v")
     except Exception:
-        pass
-    version_file = os.path.join(DIR, "VERSION")
-    try:
-        with open(version_file, "r") as f:
-            return f.read().strip()
-    except FileNotFoundError:
         pass
     return "dev"
 
@@ -120,6 +122,19 @@ def _chat_rate_allow(ip: str) -> bool:
             return False
         bucket[0] -= 1
         return True
+
+
+def _chat_rate_cleanup():
+    """Remove stale rate-limit entries older than 2× the window.
+
+    Parity with Go's chatRateLimiter.cleanup() — prevents unbounded
+    memory growth from unique IPs.
+    """
+    cutoff = time.time() - (2 * _CHAT_RATE_WINDOW)
+    with _chat_rate_lock:
+        stale = [ip for ip, bucket in _chat_rate_buckets.items() if bucket[1] < cutoff]
+        for ip in stale:
+            del _chat_rate_buckets[ip]
 
 # data.json mtime-based cache — parity with Go's getDataCached()
 _data_cache_lock = threading.Lock()
@@ -520,7 +535,17 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
     def handle_refresh(self, head_only=False):
-        run_refresh()
+        # Stale-while-revalidate: serve cached data immediately, refresh in background.
+        # Parity with Go's handleRefresh() — never blocks on refresh.sh.
+        # Serves raw bytes (like Go's getDataRawCached) — no parse/re-serialize.
+        global _last_refresh
+        now = time.time()
+
+        with _refresh_lock:
+            should_run = (now - _last_refresh) >= _debounce_sec and not _refresh_running
+
+        if should_run:
+            threading.Thread(target=run_refresh, daemon=True).start()
 
         try:
             with open(DATA_FILE, "r") as f:
@@ -688,33 +713,44 @@ def resolve_config_value(key, cli_val, env_var, config_path, default):
     return default
 
 
+_refresh_running = False
+
+
 def run_refresh():
-    """Run refresh.sh with debounce and timeout."""
-    global _last_refresh
-    now = time.time()
+    """Run refresh.sh with overlap prevention and timeout.
+
+    Parity with Go's runRefresh(): prevents overlapping runs via _refresh_running
+    flag. Debounce is checked by the caller (handle_refresh), not here.
+    """
+    global _last_refresh, _refresh_running
 
     with _refresh_lock:
-        if now - _last_refresh < _debounce_sec:
-            return True  # debounced, serve cached
+        if _refresh_running:
+            return True  # already running, skip
+        _refresh_running = True
 
-        try:
-            result = subprocess.run(
-                ["bash", REFRESH_SCRIPT],
-                timeout=REFRESH_TIMEOUT,
-                cwd=DIR,
-                capture_output=True,
-            )
-            if result.returncode != 0:
-                print(f"[dashboard] refresh.sh exited with code {result.returncode}: {result.stderr.decode(errors='replace')[:200]}")
-                return False
+    try:
+        result = subprocess.run(
+            ["bash", REFRESH_SCRIPT],
+            timeout=REFRESH_TIMEOUT,
+            cwd=DIR,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            print(f"[dashboard] refresh.sh exited with code {result.returncode}: {result.stderr.decode(errors='replace')[:200]}")
+            return False
+        with _refresh_lock:
             _last_refresh = time.time()
-            return True
-        except subprocess.TimeoutExpired:
-            print(f"[dashboard] refresh.sh timed out after {REFRESH_TIMEOUT}s")
-            return False
-        except Exception as e:
-            print(f"[dashboard] refresh.sh failed: {e}")
-            return False
+        return True
+    except subprocess.TimeoutExpired:
+        print(f"[dashboard] refresh.sh timed out after {REFRESH_TIMEOUT}s")
+        return False
+    except Exception as e:
+        print(f"[dashboard] refresh.sh failed: {e}")
+        return False
+    finally:
+        with _refresh_lock:
+            _refresh_running = False
 
 
 class ThreadingDashboardServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
@@ -786,6 +822,20 @@ examples:
 
     server = ThreadingDashboardServer((args.bind, args.port), DashboardHandler)
     server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+    # Start periodic cleanup of stale rate-limit entries — parity with Go's chatRateCleanupInterval
+    def _rate_limit_cleanup_loop():
+        while True:
+            time.sleep(300)  # 5 minutes, matching Go's chatRateCleanupInterval
+            _chat_rate_cleanup()
+
+    threading.Thread(target=_rate_limit_cleanup_loop, daemon=True).start()
+
+    # Pre-warm data.json in background — parity with Go's PreWarm()
+    if not os.path.exists(DATA_FILE):
+        print("[dashboard] pre-warming data.json...")
+        threading.Thread(target=run_refresh, daemon=True).start()
+
     print(f"[dashboard] v{VERSION}")
     print(f"[dashboard] Serving on http://{args.bind}:{args.port}/")
     print(f"[dashboard] Refresh endpoint: /api/refresh (debounce: {_debounce_sec}s)")

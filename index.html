@@ -238,8 +238,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
 <script>
 // FOUC bootstrap: read localStorage before body renders to prevent flash
 (function(){
-  var STORAGE_KEY='ocDash:collapse:v1';
-  var DEFAULTS={'alerts':false,'health':false,'cost':false,'charts':false,'crons':false,'sessions':false,'usage':false,'subagent':false,'agent-config':true};
+  var STORAGE_KEY='ocDash:collapse:v2';
+  var DEFAULTS={'alerts':false,'health':false,'cost':false,'charts':false,'crons':false,'sessions':false,'usage':false,'subagent':false,'agent-config':false};
   var state=Object.assign({},DEFAULTS);
   try{
     var raw=localStorage.getItem(STORAGE_KEY);
@@ -546,8 +546,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
     </div>
   </div>
 
-  <!-- 3-col: Search + Gateway + Capabilities -->
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:18px" id="extraConfigRow">
+  <!-- 2-row config panels: (1) Channels, Gateway Runtime, Gateway Config, Subagent Limits; (2) Plugins, Hooks, Web Search -->
+  <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:12px" id="extraConfigRow1">
 
     <!-- Channels -->
     <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="channelsPanel">
@@ -555,16 +555,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
       <div id="channelConfigPanel"></div>
     </div>
 
-    <!-- Search -->
-    <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="searchPanel">
-      <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🔍 Web Search</div>
-      <div id="searchPanelInner"></div>
+    <!-- Gateway Runtime (live /api/system data) -->
+    <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="gatewayRuntimePanel">
+      <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">⚡ Gateway Runtime</div>
+      <div id="gatewayRuntimePanelInner"><span style="color:var(--dim);font-size:12px">Loading…</span></div>
     </div>
 
-    <!-- Gateway -->
-    <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="gatewayPanel">
-      <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🌐 Gateway</div>
-      <div id="gatewayPanelInner"></div>
+    <!-- Gateway Config (config snapshot from data.json) -->
+    <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="gatewayConfigPanel">
+      <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🌐 Gateway Config</div>
+      <div id="gatewayConfigPanelInner"></div>
     </div>
 
     <!-- Subagent Limits -->
@@ -573,16 +573,26 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
       <div id="subagentConfigPanel"></div>
     </div>
 
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px" id="extraConfigRow2">
+
+    <!-- Plugins & Capabilities -->
+    <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="capsPanel">
+      <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🔌 Plugins & Extras</div>
+      <div id="capsPanelInner"></div>
+    </div>
+
     <!-- Hooks -->
     <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="hooksPanel">
       <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🪝 Internal Hooks</div>
       <div id="hooksPanelInner"></div>
     </div>
 
-    <!-- Plugins & Capabilities -->
-    <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="capsPanel">
-      <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🔌 Plugins & Extras</div>
-      <div id="capsPanelInner"></div>
+    <!-- Search -->
+    <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="searchPanel">
+      <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🔍 Web Search</div>
+      <div id="searchPanelInner"></div>
     </div>
 
   </div>
@@ -610,7 +620,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
   </table>
   </div>
 
-  <!-- subagentConfigPanel moved to extraConfigRow grid -->
   </div>
   </div>
 </section>
@@ -1092,9 +1101,9 @@ const Renderer = {
       kv('Cache TTL', (SR.cacheTtlMinutes||'—')+' min'),
     ].join('') : '<span style="color:var(--dim);font-size:12px">Not configured</span>';
 
-    // Gateway Panel
+    // Gateway Config Panel (config snapshot from data.json / agentConfig.gateway)
     const GW = AC.gateway||{};
-    $('gatewayPanelInner').innerHTML = GW.port ? [
+    $('gatewayConfigPanelInner').innerHTML = GW.port ? [
       kv('Port', GW.port, 'var(--green)'),
       kv('Mode', GW.mode),
       kv('Bind', GW.bind),
@@ -1443,14 +1452,41 @@ const SystemBar = {
   _timer: null, _inflight: false,
   cls(p, w, c) { return p==null?'sys-err':p>=c?'sys-crit':p>=w?'sys-warn':'sys-ok'; },
   fmt(b) { if(!b)return'0B'; const g=b/1073741824; return g>=1?g.toFixed(1)+'GB':(b/1048576).toFixed(0)+'MB'; },
+  fmtDurationMs(ms){
+    if(!ms||ms<=0)return'—';
+    const s=Math.floor(ms/1000);
+    if(s<60)return s+'s';
+    const m=Math.floor(s/60);
+    if(m<60)return m+'m';
+    const h=Math.floor(m/60);
+    if(h<24)return h+'h';
+    return Math.floor(h/24)+'d';
+  },
+  _versionTriplet(v) {
+    const cleaned=String(v||'').trim().replace(/^openclaw\s+/i,'').split(/[+-]/,1)[0];
+    const m=cleaned.match(/^(\d+)\.(\d+)\.(\d+)/);
+    return m?[Number(m[1]),Number(m[2]),Number(m[3])]:null;
+  },
   _versionsBehind(installed, latest) {
-    // YYYY.M.D version scheme — count how many releases behind
-    const parse=v=>{const p=v.split('.').map(Number);return p.length>=3?p:[0,0,0];};
-    const [iy,im,id]=parse(installed),[ly,lm,ld]=parse(latest);
+    // YYYY.M.D version scheme — ignore beta/dev/build suffixes for comparison.
+    const inst=this._versionTriplet(installed), lat=this._versionTriplet(latest);
+    if(!inst||!lat)return 0;
+    const [iy,im,id]=inst,[ly,lm,ld]=lat;
     if(iy===ly&&im===lm&&id===ld)return 0;
     if(iy<ly)return 2;if(iy>ly)return 0;
     if(im<lm)return(lm-im)>=2?2:1;if(im>lm)return 0;
     return(ld-id)>=2?2:1;
+  },
+  _gatewayState(d) {
+    const gwRuntime=d.openclaw?.gateway||{};
+    const gwVersion=d.versions?.gateway||{};
+    const runtimeTrusted=!!(gwRuntime.healthEndpointOk||gwRuntime.readyEndpointOk||(gwRuntime.uptimeMs||0)>0||((gwRuntime.failing||[]).length>0));
+    if(runtimeTrusted){
+      const live=!!gwRuntime.live,ready=!!gwRuntime.ready;
+      return {source:'runtime',ok:live&&ready,live,ready};
+    }
+    const status=String(gwVersion.status||'').toLowerCase();
+    return {source:'versions',ok:['online','running'].includes(status),live:['online','running'].includes(status),ready:['online','running'].includes(status)};
   },
   render(d) {
     const bar=$('systemTopBar'); if(!d){bar.style.display='none';return;}
@@ -1470,16 +1506,99 @@ const SystemBar = {
     sp('sysRam','RAM',ramErr?null:(d.ram?.percent??null),tRam,!ramErr&&d.ram?.totalBytes>0?'RAM '+this.fmt(d.ram.usedBytes)+'/'+this.fmt(d.ram.totalBytes):null);
     sp('sysSwap','Swap',swapErr?null:(d.swap?.percent??null),tSwap);
     sp('sysDisk','Disk',d.disk?.error?null:(d.disk?.percent??null),tDisk,d.disk?.totalBytes>0?'Disk used '+this.fmt(d.disk.usedBytes)+'/'+this.fmt(d.disk.totalBytes)+' ('+d.disk.percent.toFixed(1)+'%)':null);
-    const oc=$('sysOclaw');const inst=d.versions?.openclaw||'?';const latest=d.versions?.latest||'';
+    const ocData=d.openclaw||{};
+    const ocStatus=ocData.status||{};
+    const inst=ocStatus.currentVersion||d.versions?.openclaw||'?';
+    const latest=ocStatus.latestVersion||d.versions?.latest||'';
+    const oc=$('sysOclaw');
     let ocClass='sys-ok';
     if(latest&&inst!=='?'&&inst!==latest){const behind=this._versionsBehind(inst,latest);ocClass=behind>=2?'sys-err':behind===1?'sys-warn':'sys-ok';}
-    oc.className='sys-pill '+ocClass;oc.textContent='OpenClaw '+inst+(latest&&inst!==latest?' (latest: '+latest+')':'');
-    const gwok=['online','running'].includes(d.versions?.gateway?.status);
-    // Set global flag so Renderer.render() can skip re-creating the "Gateway is offline" alert
-    window._gwOnlineConfirmed = gwok;
+    const latency=ocStatus.connectLatencyMs?(' · '+ocStatus.connectLatencyMs+'ms'):'';
+    oc.className='sys-pill '+ocClass;
+    oc.textContent='OpenClaw '+inst+latency+(latest&&inst!==latest?' (latest: '+latest+')':'');
+
+    const gwRuntime=ocData.gateway||{};
+    const gwVersion=d.versions?.gateway||{};
+    const gwState=this._gatewayState(d);
+    const gwLive=!!gwState.live;
+    const gwReady=!!gwState.ready;
+    const gwok=!!gwState.ok;
+    // Set global flag so Renderer.render() can skip re-creating the "Gateway is offline" alert.
+    // "Live but not ready" is degraded, but not offline.
+    window._gwOnlineConfirmed = gwLive;
     $('sysStale').style.display=d.stale?'inline':'none';
-    // Also update health panel gateway from /api/system (more reliable than refresh.sh)
-    if(d.versions?.gateway){const gwSys=d.versions.gateway;const gwOn=['online','running'].includes(gwSys.status);$('hGw').innerHTML=gwOn?'<span style="color:var(--green)">●</span> Online':'<span style="color:var(--red)">●</span> Offline';$('hGw').style.color='var(--textStrong)';if(gwSys.pid)$('hPid').textContent=gwSys.pid;if(gwSys.uptime)$('hUp').textContent=gwSys.uptime;if(gwSys.memory)$('hMem').textContent=gwSys.memory;if(gwOn){const as=$('alertsSection');if(as){const items=as.querySelectorAll('.alert-item');items.forEach(el=>{if(el.textContent.includes('Gateway is offline'))el.remove();})}}}
+
+    // Also update health panel gateway from /api/system (runtime-first when trustworthy, versions fallback otherwise)
+    if(gwState.source==='runtime'){
+      if(gwLive&&gwReady){
+        $('hGw').innerHTML='<span style="color:var(--green)">●</span> Online';
+      }else if(gwLive&&!gwReady){
+        $('hGw').innerHTML='<span style="color:var(--green)">●</span> Live';
+      }else{
+        $('hGw').innerHTML='<span style="color:var(--red)">●</span> Offline';
+      }
+    }else{
+      $('hGw').innerHTML=gwok?'<span style="color:var(--green)">●</span> Online':'<span style="color:var(--red)">●</span> Offline';
+    }
+    $('hGw').style.color='var(--textStrong)';
+    if(gwVersion.pid)$('hPid').textContent=gwVersion.pid;
+    if(gwState.source==='runtime'){
+      const upTxt=this.fmtDurationMs(gwRuntime.uptimeMs);
+      $('hUp').textContent=upTxt!=='—'?upTxt:(gwVersion.uptime||'—');
+    } else if(gwVersion.uptime) {
+      $('hUp').textContent=gwVersion.uptime;
+    }
+    if(gwVersion.memory)$('hMem').textContent=gwVersion.memory;
+    if(gwok){const as=$('alertsSection');if(as){const items=as.querySelectorAll('.alert-item');items.forEach(el=>{if(el.textContent.includes('Gateway is offline'))el.remove();})}}
+
+    // Gateway readiness alert — synthesized from /api/system failing[] list (generic, not channel-specific).
+    // Shown when gateway is live but not all dependencies are ready (e.g. discord, slack, telegram).
+    // Disappears automatically when readiness recovers or gateway goes fully offline.
+    // Does not conflict with the "Gateway is offline" alert: that alert is shown only when gwLive=false.
+    {
+      const gwFailingDeps = Array.isArray(gwRuntime.failing) ? gwRuntime.failing : [];
+      const gwReadyAlertEl = $('gw-readiness-alert');
+      if (gwLive && !gwReady && gwState.source === 'runtime') {
+        const depStr = gwFailingDeps.length ? gwFailingDeps.map(f => esc(f)).join(', ') : '';
+        const alertMsg = depStr ? 'Gateway not ready: ' + depStr : 'Gateway not ready';
+        if (gwReadyAlertEl) {
+          gwReadyAlertEl.querySelector('.alert-msg').innerHTML = alertMsg;
+        } else {
+          const alertEl = document.createElement('div');
+          alertEl.id = 'gw-readiness-alert';
+          alertEl.className = 'alert-item alert-medium';
+          alertEl.innerHTML = '<span class="alert-icon">🟡</span><span class="alert-msg">' + alertMsg + '</span>';
+          const as = $('alertsSection');
+          if (as) as.insertAdjacentElement('afterbegin', alertEl);
+        }
+      } else if (gwReadyAlertEl) {
+        gwReadyAlertEl.remove();
+      }
+    }
+
+    // Gateway Runtime card — populated from live /api/system data
+    const gwRtEl=$('gatewayRuntimePanelInner');
+    if(gwRtEl){
+      const esc2=s=>String(s??'—').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const kvR=(k,v,c='var(--text)')=>`<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:12px;color:var(--muted)">${esc2(k)}</span><span style="font-size:12px;color:${c};font-weight:600">${esc2(v)}</span></div>`;
+      const stateLabel=gwState.source==='runtime'
+        ?(gwLive?'Online':'Offline')
+        :(gwok?'Online':'Offline');
+      const stateColor=gwState.source==='runtime'
+        ?(gwLive?'var(--green)':'var(--red)')
+        :(gwok?'var(--green)':'var(--red)');
+      const upTxt=gwState.source==='runtime'?this.fmtDurationMs(gwRuntime.uptimeMs)||gwVersion.uptime||'—':gwVersion.uptime||'—';
+      const probeSource=gwState.source==='runtime'?'live probes':'status fallback';
+      gwRtEl.innerHTML=[
+        kvR('State', stateLabel, stateColor),
+        kvR('Version', gwVersion.version||'—'),
+        kvR('PID', gwVersion.pid||'—'),
+        kvR('Uptime', upTxt),
+        kvR('Memory', gwVersion.memory||'—'),
+        kvR('Source', probeSource, 'var(--muted)'),
+      ].join('');
+    }
+
     if(d.pollSeconds&&d.pollSeconds>0&&d.pollSeconds*1000!==this._lastMs)this.start(d.pollSeconds*1000);
   },
   async fetch() {
@@ -1495,8 +1614,8 @@ const SystemBar = {
 const SECTION_KEYS = ['alerts','health','cost','charts','crons','sessions','usage','subagent','agent-config'];
 const Sections = {
   _state: {},
-  STORAGE_KEY: 'ocDash:collapse:v1',
-  DEFAULTS: {'alerts':false,'health':false,'cost':false,'charts':false,'crons':false,'sessions':false,'usage':false,'subagent':false,'agent-config':true},
+  STORAGE_KEY: 'ocDash:collapse:v2',
+  DEFAULTS: {'alerts':false,'health':false,'cost':false,'charts':false,'crons':false,'sessions':false,'usage':false,'subagent':false,'agent-config':false},
 
   loadState() {
     var merged = Object.assign({}, this.DEFAULTS);
