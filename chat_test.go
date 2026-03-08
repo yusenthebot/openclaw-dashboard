@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCallGateway_Success(t *testing.T) {
@@ -128,6 +129,72 @@ func TestCallGateway_HistoryIncluded(t *testing.T) {
 	}
 	if answer != "ok" {
 		t.Fatalf("expected 'ok', got %q", answer)
+	}
+}
+
+func TestCallGateway_Timeout_Returns504(t *testing.T) {
+	// Test server that sleeps longer than the client timeout
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Second)
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"too late"}}]}`)
+	}))
+	defer ts.Close()
+
+	port := extractPort(t, ts.URL)
+	client := &http.Client{Timeout: 100 * time.Millisecond}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err := callGateway(ctx, "sys", nil, "hi", port, "tok", "model", client)
+	if err == nil {
+		t.Fatal("expected error on timeout")
+	}
+
+	ge, ok := err.(*gatewayError)
+	if !ok {
+		t.Fatalf("expected *gatewayError, got %T: %v", err, err)
+	}
+	if ge.Status != http.StatusGatewayTimeout {
+		t.Fatalf("expected status 504, got %d", ge.Status)
+	}
+}
+
+func TestCallGateway_HTTPError_Returns502(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"error":"boom"}`)
+	}))
+	defer ts.Close()
+
+	port := extractPort(t, ts.URL)
+	client := &http.Client{}
+	_, err := callGateway(context.Background(), "sys", nil, "hi", port, "tok", "model", client)
+	if err == nil {
+		t.Fatal("expected error for 500 response")
+	}
+
+	ge, ok := err.(*gatewayError)
+	if !ok {
+		t.Fatalf("expected *gatewayError, got %T: %v", err, err)
+	}
+	if ge.Status != http.StatusBadGateway {
+		t.Fatalf("expected status 502, got %d", ge.Status)
+	}
+}
+
+func TestCallGateway_Unreachable_Returns502(t *testing.T) {
+	client := &http.Client{}
+	_, err := callGateway(context.Background(), "sys", nil, "hi", 1, "tok", "model", client)
+	if err == nil {
+		t.Fatal("expected error for unreachable server")
+	}
+
+	ge, ok := err.(*gatewayError)
+	if !ok {
+		t.Fatalf("expected *gatewayError, got %T: %v", err, err)
+	}
+	if ge.Status != http.StatusBadGateway {
+		t.Fatalf("expected status 502, got %d", ge.Status)
 	}
 }
 

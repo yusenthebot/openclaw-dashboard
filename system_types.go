@@ -27,6 +27,7 @@ type SystemResponse struct {
 	Swap        SystemSwap       `json:"swap"`
 	Disk        SystemDisk       `json:"disk"`
 	Versions    SystemVersions   `json:"versions"`
+	Openclaw    SystemOpenclaw   `json:"openclaw"`
 	Errors      []string         `json:"errors,omitempty"`
 }
 
@@ -72,4 +73,32 @@ type SystemVersions struct {
 	Openclaw  string        `json:"openclaw"`
 	Latest    string        `json:"latest,omitempty"`
 	Gateway   SystemGateway `json:"gateway"`
+}
+
+type SystemOpenclaw struct {
+	Gateway   SystemOpenclawGateway   `json:"gateway"`
+	Status    SystemOpenclawStatus    `json:"status"`
+	Freshness SystemOpenclawFreshness `json:"freshness"`
+	Errors    []string                `json:"errors,omitempty"`
+}
+
+type SystemOpenclawGateway struct {
+	Live             bool     `json:"live"`
+	Ready            bool     `json:"ready"`
+	UptimeMs         int64    `json:"uptimeMs"`
+	Failing          []string `json:"failing,omitempty"`
+	HealthEndpointOk bool     `json:"healthEndpointOk"`
+	ReadyEndpointOk  bool     `json:"readyEndpointOk"`
+}
+
+type SystemOpenclawStatus struct {
+	CurrentVersion   string         `json:"currentVersion,omitempty"`
+	LatestVersion    string         `json:"latestVersion,omitempty"`
+	ConnectLatencyMs int64          `json:"connectLatencyMs,omitempty"`
+	Security         map[string]any `json:"security,omitempty"`
+}
+
+type SystemOpenclawFreshness struct {
+	Gateway string `json:"gateway,omitempty"`
+	Status  string `json:"status,omitempty"`
 }

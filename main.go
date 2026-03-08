@@ -25,7 +25,11 @@ func main() {
 		exe = "."
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
-	dir := filepath.Dir(exe)
+	binDir := filepath.Dir(exe)
+
+	// Resolve repo root: binaries built into dist/ (or other subdirs) need to
+	// find repo-root assets like refresh.sh, config.json, data.json, VERSION.
+	dir := resolveRepoRoot(binDir)
 
 	version := detectVersion(dir)
 	cfg := loadConfig(dir)

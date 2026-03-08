@@ -371,7 +371,9 @@ func probeOpenclawGatewayEndpoints(ctx context.Context, gatewayPort int, timeout
 		}
 	}
 
-	if m, err := fetchJSONMap(ctx, client, base+"/readyz"); err != nil {
+	// readyz returns 503 when not ready — but the body still contains useful JSON
+	// (ready, failing, uptimeMs). Parse it on both 200 and 503.
+	if m, err := fetchJSONMapAllowStatus(ctx, client, base+"/readyz", 200, 503); err != nil {
 		errs = append(errs, "gateway /readyz: "+err.Error())
 	} else {
 		gw.ReadyEndpointOk = true
@@ -385,6 +387,35 @@ func probeOpenclawGatewayEndpoints(ctx context.Context, gatewayPort int, timeout
 	}
 
 	return gw, errs
+}
+
+// fetchJSONMapAllowStatus is like fetchJSONMap but accepts specific HTTP status
+// codes as valid (e.g., readyz returns 503 with a useful JSON body).
+func fetchJSONMapAllowStatus(ctx context.Context, client *http.Client, url string, allowedStatuses ...int) (map[string]any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	allowed := false
+	for _, s := range allowedStatuses {
+		if resp.StatusCode == s {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return nil, fmt.Errorf("status %d", resp.StatusCode)
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 func fetchJSONMap(ctx context.Context, client *http.Client, url string) (map[string]any, error) {

@@ -375,11 +375,18 @@ class TestSystemEndpoint(ServerTestBase):
         data = json.loads(body)
         # Required top-level keys
         for key in ("ok", "degraded", "stale", "collectedAt", "pollSeconds",
-                    "cpu", "ram", "swap", "disk", "versions"):
+                    "cpu", "ram", "swap", "disk", "versions", "openclaw"):
             self.assertIn(key, data, f"missing key: {key}")
         self.assertIsInstance(data["pollSeconds"], int)
         self.assertGreater(data["pollSeconds"], 0)
         self.assertIsNotNone(data["collectedAt"])
+        oc = data["openclaw"]
+        for key in ("gateway", "status", "freshness"):
+            self.assertIn(key, oc, f"missing openclaw key: {key}")
+        # channels and bindings were intentionally removed from the runtime contract
+        for removed_key in ("channels", "bindings"):
+            self.assertNotIn(removed_key, oc,
+                f"openclaw.{removed_key} should have been removed")
 
     def test_system_head_no_body(self):
         conn = self._conn()
@@ -444,6 +451,41 @@ class TestChatRateLimit(unittest.TestCase):
         # Different IP should still be allowed
         self.assertTrue(self.server._chat_rate_allow("10.0.0.2"),
                         "different IP should not be affected")
+
+
+class TestChatRateLimitCleanup(unittest.TestCase):
+    """Test rate-limiter cleanup removes stale entries."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, REPO)
+        import server
+        cls.server = server
+
+    def setUp(self):
+        with self.server._chat_rate_lock:
+            self.server._chat_rate_buckets.clear()
+
+    def test_cleanup_removes_old_entries(self):
+        """Entries older than 2× window should be removed by cleanup."""
+        old_time = time.time() - (3 * self.server._CHAT_RATE_WINDOW)
+        with self.server._chat_rate_lock:
+            self.server._chat_rate_buckets["10.0.0.1"] = [5, old_time]
+            self.server._chat_rate_buckets["10.0.0.2"] = [5, time.time()]  # fresh
+
+        self.server._chat_rate_cleanup()
+
+        with self.server._chat_rate_lock:
+            self.assertNotIn("10.0.0.1", self.server._chat_rate_buckets,
+                             "Stale entry should be removed")
+            self.assertIn("10.0.0.2", self.server._chat_rate_buckets,
+                          "Fresh entry should be kept")
+
+    def test_cleanup_empty_dict_is_noop(self):
+        """Cleanup on empty dict should not error."""
+        self.server._chat_rate_cleanup()  # should not raise
+        with self.server._chat_rate_lock:
+            self.assertEqual(len(self.server._chat_rate_buckets), 0)
 
 
 class TestCallGatewayReturnTypes(unittest.TestCase):

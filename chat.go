@@ -243,6 +243,15 @@ type completionPayload struct {
 	Stream    bool          `json:"stream"`
 }
 
+// gatewayError wraps a gateway failure with the appropriate HTTP status code.
+// Used by handleChat to return 502 (Bad Gateway) vs 504 (Gateway Timeout).
+type gatewayError struct {
+	Status int    // HTTP status to return to the client (502 or 504)
+	Msg    string
+}
+
+func (e *gatewayError) Error() string { return e.Msg }
+
 func callGateway(ctx context.Context, system string, history []chatMessage, question string, port int, token, model string, client *http.Client) (string, error) {
 	// Pre-allocate messages slice: system + history + user question
 	messages := make([]chatMessage, 0, 2+len(history))
@@ -258,29 +267,32 @@ func callGateway(ctx context.Context, system string, history []chatMessage, ques
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("marshal error: %w", err)
+		return "", &gatewayError{Status: http.StatusBadGateway, Msg: fmt.Sprintf("marshal error: %v", err)}
 	}
 
 	url := "http://localhost:" + strconv.Itoa(port) + "/v1/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("request error: %w", err)
+		return "", &gatewayError{Status: http.StatusBadGateway, Msg: fmt.Sprintf("request error: %v", err)}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("gateway unreachable: %w", err)
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", &gatewayError{Status: http.StatusGatewayTimeout, Msg: "Gateway timed out — model took too long to respond"}
+		}
+		return "", &gatewayError{Status: http.StatusBadGateway, Msg: fmt.Sprintf("gateway unreachable: %v", err)}
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxGatewayResp+1))
 	if err != nil {
-		return "", fmt.Errorf("read error: %w", err)
+		return "", &gatewayError{Status: http.StatusBadGateway, Msg: fmt.Sprintf("read error: %v", err)}
 	}
 	if len(respBody) > maxGatewayResp {
-		return "", fmt.Errorf("gateway response too large (>%d bytes)", maxGatewayResp)
+		return "", &gatewayError{Status: http.StatusBadGateway, Msg: fmt.Sprintf("gateway response too large (>%d bytes)", maxGatewayResp)}
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -288,7 +300,7 @@ func callGateway(ctx context.Context, system string, history []chatMessage, ques
 		if len(preview) > 200 {
 			preview = preview[:200]
 		}
-		return "", fmt.Errorf("gateway HTTP %d: %s", resp.StatusCode, preview)
+		return "", &gatewayError{Status: http.StatusBadGateway, Msg: fmt.Sprintf("gateway HTTP %d: %s", resp.StatusCode, preview)}
 	}
 
 	var result struct {
@@ -299,7 +311,7 @@ func callGateway(ctx context.Context, system string, history []chatMessage, ques
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("parse error: %w", err)
+		return "", &gatewayError{Status: http.StatusBadGateway, Msg: fmt.Sprintf("parse error: %v", err)}
 	}
 	if len(result.Choices) == 0 {
 		return "(empty response)", nil

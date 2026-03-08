@@ -136,7 +136,10 @@ class TestFrontendJS(unittest.TestCase):
         self.assertFalse(result["ok"])
 
     def test_gateway_live_not_ready_label_present(self):
-        self.assertIn("Live / Not Ready", self.html)
+        # Health pill was simplified: "Live / Not Ready" → just "Live" (not-ready state,
+        # shows green dot but no full "Online"). The readiness alert handles the "not ready"
+        # notification separately in alertsSection.
+        self.assertIn("'<span style=\"color:var(--green)\">●</span> Live'", self.html)
         self.assertIn("window._gwOnlineConfirmed = gwLive", self.html)
 
 

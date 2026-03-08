@@ -238,8 +238,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
 <script>
 // FOUC bootstrap: read localStorage before body renders to prevent flash
 (function(){
-  var STORAGE_KEY='ocDash:collapse:v1';
-  var DEFAULTS={'alerts':false,'health':false,'cost':false,'charts':false,'crons':false,'sessions':false,'usage':false,'subagent':false,'agent-config':true};
+  var STORAGE_KEY='ocDash:collapse:v2';
+  var DEFAULTS={'alerts':false,'health':false,'cost':false,'charts':false,'crons':false,'sessions':false,'usage':false,'subagent':false,'agent-config':false};
   var state=Object.assign({},DEFAULTS);
   try{
     var raw=localStorage.getItem(STORAGE_KEY);
@@ -546,19 +546,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
     </div>
   </div>
 
-  <!-- 3-col: Search + Gateway + Capabilities -->
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:18px" id="extraConfigRow">
+  <!-- 2-row config panels: (1) Channels, Gateway Runtime, Gateway Config, Subagent Limits; (2) Plugins, Hooks, Web Search -->
+  <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:12px" id="extraConfigRow1">
 
     <!-- Channels -->
     <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="channelsPanel">
       <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">📡 Channels</div>
       <div id="channelConfigPanel"></div>
-    </div>
-
-    <!-- Search -->
-    <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="searchPanel">
-      <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🔍 Web Search</div>
-      <div id="searchPanelInner"></div>
     </div>
 
     <!-- Gateway Runtime (live /api/system data) -->
@@ -579,16 +573,26 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
       <div id="subagentConfigPanel"></div>
     </div>
 
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px" id="extraConfigRow2">
+
+    <!-- Plugins & Capabilities -->
+    <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="capsPanel">
+      <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🔌 Plugins & Extras</div>
+      <div id="capsPanelInner"></div>
+    </div>
+
     <!-- Hooks -->
     <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="hooksPanel">
       <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🪝 Internal Hooks</div>
       <div id="hooksPanelInner"></div>
     </div>
 
-    <!-- Plugins & Capabilities -->
-    <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="capsPanel">
-      <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🔌 Plugins & Extras</div>
-      <div id="capsPanelInner"></div>
+    <!-- Search -->
+    <div style="background:var(--glass);border:1px solid var(--border);border-radius:8px;padding:12px" id="searchPanel">
+      <div style="font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🔍 Web Search</div>
+      <div id="searchPanelInner"></div>
     </div>
 
   </div>
@@ -616,7 +620,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro','Helvetica Neue',sans
   </table>
   </div>
 
-  <!-- subagentConfigPanel moved to extraConfigRow grid -->
   </div>
   </div>
 </section>
@@ -1530,7 +1533,7 @@ const SystemBar = {
       if(gwLive&&gwReady){
         $('hGw').innerHTML='<span style="color:var(--green)">●</span> Online';
       }else if(gwLive&&!gwReady){
-        $('hGw').innerHTML='<span style="color:var(--yellow)">●</span> Live / Not Ready';
+        $('hGw').innerHTML='<span style="color:var(--green)">●</span> Live';
       }else{
         $('hGw').innerHTML='<span style="color:var(--red)">●</span> Offline';
       }
@@ -1579,10 +1582,10 @@ const SystemBar = {
       const esc2=s=>String(s??'—').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       const kvR=(k,v,c='var(--text)')=>`<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:12px;color:var(--muted)">${esc2(k)}</span><span style="font-size:12px;color:${c};font-weight:600">${esc2(v)}</span></div>`;
       const stateLabel=gwState.source==='runtime'
-        ?(gwLive&&gwReady?'Online':(gwLive?'Live / Not Ready':'Offline'))
+        ?(gwLive?'Online':'Offline')
         :(gwok?'Online':'Offline');
       const stateColor=gwState.source==='runtime'
-        ?(gwLive&&gwReady?'var(--green)':(gwLive?'var(--yellow)':'var(--red)'))
+        ?(gwLive?'var(--green)':'var(--red)')
         :(gwok?'var(--green)':'var(--red)');
       const upTxt=gwState.source==='runtime'?this.fmtDurationMs(gwRuntime.uptimeMs)||gwVersion.uptime||'—':gwVersion.uptime||'—';
       const probeSource=gwState.source==='runtime'?'live probes':'status fallback';
@@ -1611,8 +1614,8 @@ const SystemBar = {
 const SECTION_KEYS = ['alerts','health','cost','charts','crons','sessions','usage','subagent','agent-config'];
 const Sections = {
   _state: {},
-  STORAGE_KEY: 'ocDash:collapse:v1',
-  DEFAULTS: {'alerts':false,'health':false,'cost':false,'charts':false,'crons':false,'sessions':false,'usage':false,'subagent':false,'agent-config':true},
+  STORAGE_KEY: 'ocDash:collapse:v2',
+  DEFAULTS: {'alerts':false,'health':false,'cost':false,'charts':false,'crons':false,'sessions':false,'usage':false,'subagent':false,'agent-config':false},
 
   loadState() {
     var merged = Object.assign({}, this.DEFAULTS);
