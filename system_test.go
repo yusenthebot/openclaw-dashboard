@@ -879,3 +879,156 @@ func TestRefresh_DataMissing_HasCORSHeaders(t *testing.T) {
 		t.Errorf("503 response should have CORS header, got %q", cors)
 	}
 }
+
+// ── Tests for B2 fix: stale injection JSON round-trip ────────────────────
+
+func TestStaleByteInjection_JSONRoundTrip(t *testing.T) {
+	// Verify stale injection works correctly even without the exact "stale":false byte pattern.
+	// The B2 fix replaces byte-level replacement with a safe JSON round-trip.
+	dir := t.TempDir()
+	srv := testServer(t, dir)
+
+	// Prime the cache
+	req1 := httptest.NewRequest(http.MethodGet, "/api/system", nil)
+	w1 := httptest.NewRecorder()
+	srv.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("prime request: expected 200, got %d", w1.Code)
+	}
+	var resp1 SystemResponse
+	if err := json.Unmarshal(w1.Body.Bytes(), &resp1); err != nil {
+		t.Fatalf("prime unmarshal: %v", err)
+	}
+	if resp1.Stale {
+		t.Fatal("prime response should not be stale")
+	}
+
+	// Expire the cache
+	srv.systemSvc.metricsMu.Lock()
+	srv.systemSvc.metricsAt = time.Now().Add(-1 * time.Hour)
+	srv.systemSvc.metricsMu.Unlock()
+
+	// Stale request: should get stale=true via JSON round-trip (not byte replacement)
+	req2 := httptest.NewRequest(http.MethodGet, "/api/system", nil)
+	w2 := httptest.NewRecorder()
+	srv.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("stale request: expected 200, got %d", w2.Code)
+	}
+
+	var resp2 SystemResponse
+	if err := json.Unmarshal(w2.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("stale unmarshal: %v\nbody: %s", err, w2.Body.String())
+	}
+	if !resp2.Stale {
+		t.Error("expected stale=true after cache expiry (B2 fix: JSON round-trip)")
+	}
+	// Verify other fields are preserved through the round-trip
+	if resp2.CollectedAt == "" {
+		t.Error("collectedAt should be preserved through stale round-trip")
+	}
+	if resp2.PollSeconds <= 0 {
+		t.Errorf("pollSeconds should be preserved, got %d", resp2.PollSeconds)
+	}
+}
+
+// ── Tests for I2 fix: collectVersions parses stdout on non-zero exit ──────
+
+func TestParseGatewayStatusJSON_I2_NonZeroExitStillParsed(t *testing.T) {
+	// I2 fix: parseGatewayStatusJSON should extract status from stdout JSON even
+	// when the calling code received a non-zero exit from the CLI.
+	// This test verifies the parsing function correctly handles the JSON that
+	// would arrive from a CLI that exits non-zero but emits valid JSON stdout.
+	ctx := context.Background()
+	// Simulate what runWithTimeout returns on non-zero exit with valid stdout
+	nonZeroStdout := `{"service":{"loaded":true,"runtime":{"status":"running","pid":4242}},"version":"2026.3.7"}`
+	got := parseGatewayStatusJSON(ctx, nonZeroStdout)
+
+	// The JSON should be fully parsed regardless of the exit code (I2 fix)
+	if got.Status != "online" {
+		t.Errorf("I2 fix: expected status=online from non-zero-exit stdout JSON, got %q", got.Status)
+	}
+	if got.Version != "2026.3.7" {
+		t.Errorf("I2 fix: expected version=2026.3.7, got %q", got.Version)
+	}
+	// PID is extracted and used to get process info — just verify it's non-zero
+	if got.PID == 0 {
+		t.Errorf("I2 fix: expected non-zero PID from parsed JSON, got %d", got.PID)
+	}
+}
+
+func TestCollectVersions_GatewayNoStdoutFallsBackToHTTP_I2(t *testing.T) {
+	// Integration test: when collectVersions receives no usable JSON from the CLI
+	// (stdout = plain text error, non-zero exit), it must fall back to HTTP probe.
+	// We spin up a local HTTP server to act as the "gateway reachable" signal.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200) // gateway reachable
+	}))
+	defer srv.Close()
+	parts := strings.Split(srv.URL, ":")
+	port, _ := strconv.Atoi(parts[len(parts)-1])
+
+	// Verify the I2 fallback path: when stdout has no JSON, detectGatewayFallback is
+	// invoked (we confirm this by pointing gatewayPort at our test server).
+	// We can't inject a fake binary into collectVersions (it uses resolveOpenclawBin),
+	// but we can verify behavior when the real binary CLI returns non-JSON output.
+	ctx := context.Background()
+	// Directly test the fallback function that I2 invokes on no-JSON stdout
+	gw := detectGatewayFallback(ctx, port, 3000)
+	if gw.Status != "online" {
+		t.Errorf("detectGatewayFallback: expected online for reachable HTTP server, got %q", gw.Status)
+	}
+}
+
+
+
+// ── Tests for I2 fix: collectOpenclawRuntime parses status stdout on non-zero exit
+
+func TestCollectOpenclawRuntime_StatusParsesStdoutOnNonZeroExit(t *testing.T) {
+	// When `openclaw status --json` exits non-zero but stdout contains useful JSON,
+	// the version/latency/security data should still be extracted. (I2 fix)
+	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"status":"live"}`))
+		case "/readyz":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ready":true,"uptimeMs":100}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gw.Close()
+	parts := strings.Split(gw.URL, ":")
+	port, _ := strconv.Atoi(parts[len(parts)-1])
+
+	binDir := t.TempDir()
+	fake := filepath.Join(binDir, "openclaw")
+	// status --json exits 1 but emits useful JSON to stdout
+	script := `#!/bin/sh
+if [ "$1" = "status" ] && [ "$2" = "--json" ]; then
+  echo '{"currentVersion":"2026.3.9","latestVersion":"2026.3.10","connectLatencyMs":55}'
+  exit 1
+fi
+exit 1
+`
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake openclaw: %v", err)
+	}
+
+	inputVer := SystemVersions{Openclaw: "2026.3.8-fallback", Latest: "2026.3.10"}
+	oc := collectOpenclawRuntime(context.Background(), fake, 2000, port, inputVer)
+
+	// I2 fix: version fields should be extracted from stdout even on non-zero exit
+	if oc.Status.CurrentVersion != "2026.3.9" {
+		t.Errorf("I2 fix: expected currentVersion='2026.3.9' from stdout, got %q", oc.Status.CurrentVersion)
+	}
+	if oc.Status.ConnectLatencyMs != 55 {
+		t.Errorf("I2 fix: expected connectLatencyMs=55, got %d", oc.Status.ConnectLatencyMs)
+	}
+	// Non-zero exit should still be reported as an error
+	if len(oc.Errors) == 0 {
+		t.Error("expected non-zero exit error to be reported in openclaw.errors")
+	}
+}

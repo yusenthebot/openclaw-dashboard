@@ -110,6 +110,7 @@ class TestCache(unittest.TestCase):
         sm._ms.refreshing = False
         sm._vs.cache = None
         sm._vs.at = 0.0
+        sm._vs.refreshing = False
         sm._cfg = {
             "enabled": True,
             "pollSeconds": 5,
@@ -701,6 +702,7 @@ class TestStaleInjectionSafe(unittest.TestCase):
         sm._ms.refreshing = False
         sm._vs.cache = None
         sm._vs.at = 0.0
+        sm._vs.refreshing = False
 
     def setUp(self):
         self._reset_state()
@@ -756,6 +758,7 @@ class TestVersionCollectionI2(unittest.TestCase):
         import system_metrics as sm
         sm._vs.cache = None
         sm._vs.at = 0.0
+        sm._vs.refreshing = False
         sm._cfg["gatewayTimeoutMs"] = 1500
         sm._cfg["gatewayPort"] = 18789
 
@@ -799,6 +802,7 @@ class TestVersionCollection(unittest.TestCase):
         import system_metrics as sm
         sm._vs.cache = None
         sm._vs.at = 0.0
+        sm._vs.refreshing = False
         sm._cfg["gatewayTimeoutMs"] = 1500
         sm._cfg["gatewayPort"] = 18789
 
@@ -924,6 +928,137 @@ class TestVersionCollection(unittest.TestCase):
                 os.environ.pop("HOME", None)
             else:
                 os.environ["HOME"] = old_home
+
+
+class TestVersionsCacheThunderingHerd(unittest.TestCase):
+    """Thundering-herd guard: _get_versions_cached must not spawn multiple
+    concurrent _collect_versions calls when the cache expires simultaneously."""
+
+    def setUp(self):
+        import system_metrics as sm
+        sm._vs.cache = None
+        sm._vs.at = 0.0
+        sm._vs.refreshing = False
+
+    def tearDown(self):
+        import system_metrics as sm
+        sm._vs.cache = None
+        sm._vs.at = 0.0
+        sm._vs.refreshing = False
+
+    def test_refreshing_flag_prevents_concurrent_collect(self):
+        """When _vs.refreshing is True, _get_versions_cached must return stale
+        without calling _collect_versions a second time."""
+        import system_metrics as sm
+        import threading
+
+        call_count = 0
+        barrier = threading.Barrier(2, timeout=3)
+
+        def _slow_collect():
+            nonlocal call_count
+            call_count += 1
+            # Block until both threads have been scheduled — simulates slow I/O
+            try:
+                barrier.wait()
+            except threading.BrokenBarrierError:
+                pass
+            return {"dashboard": "test", "openclaw": "1.0.0", "latest": "", "gateway": {}}
+
+        # Seed a stale cache entry
+        sm._vs.cache = {"dashboard": "test", "openclaw": "stale", "latest": "", "gateway": {}}
+        sm._vs.at = 0  # force expiry
+
+        with patch.object(sm, "_collect_versions", side_effect=_slow_collect):
+            results = []
+            errors = []
+
+            def caller():
+                try:
+                    results.append(sm._get_versions_cached())
+                except Exception as e:
+                    errors.append(e)
+
+            # Spawn two threads simultaneously — only ONE should call _collect_versions
+            t1 = threading.Thread(target=caller)
+            t2 = threading.Thread(target=caller)
+            t1.start()
+            t2.start()
+            # Let the barrier release after a moment (prevent deadlock if only 1 thread)
+            import time
+            time.sleep(0.05)
+            try:
+                barrier.abort()
+            except Exception:
+                pass
+            t1.join(timeout=5)
+            t2.join(timeout=5)
+
+        self.assertEqual(len(errors), 0, f"Thread errors: {errors}")
+        # _collect_versions should have been called at most once (thundering herd prevented)
+        self.assertLessEqual(call_count, 1,
+            f"_collect_versions called {call_count} times — thundering herd not prevented")
+
+    def test_returns_stale_while_refreshing_flag_set(self):
+        """If another thread holds the refreshing flag, return stale immediately."""
+        import system_metrics as sm
+
+        # Seed a stale cache
+        stale = {"dashboard": "test", "openclaw": "stale-ver", "latest": "", "gateway": {}}
+        sm._vs.cache = stale
+        sm._vs.at = 0  # force expiry
+        sm._vs.refreshing = True  # simulate a thread already refreshing
+
+        call_count = 0
+
+        def _noop_collect():
+            nonlocal call_count
+            call_count += 1
+            return {"dashboard": "test", "openclaw": "fresh", "latest": "", "gateway": {}}
+
+        with patch.object(sm, "_collect_versions", side_effect=_noop_collect):
+            got = sm._get_versions_cached()
+
+        # Should return the stale cache without calling _collect_versions
+        self.assertEqual(call_count, 0, "_collect_versions should not be called when refreshing=True")
+        self.assertEqual(got.get("openclaw"), "stale-ver")
+        # Reset refreshing flag (normally the refresh thread does this)
+        sm._vs.refreshing = False
+
+    def test_refreshing_flag_reset_on_success(self):
+        """After a successful collect, refreshing must be reset to False."""
+        import system_metrics as sm
+
+        sm._vs.cache = None
+        sm._vs.at = 0.0
+        sm._vs.refreshing = False
+
+        fresh = {"dashboard": "test", "openclaw": "fresh", "latest": "", "gateway": {}}
+        with patch.object(sm, "_collect_versions", return_value=fresh):
+            sm._get_versions_cached()
+
+        self.assertFalse(sm._vs.refreshing,
+            "refreshing flag must be reset to False after successful collection")
+
+    def test_refreshing_flag_reset_on_exception(self):
+        """Even when _collect_versions raises, refreshing must be reset to False."""
+        import system_metrics as sm
+
+        sm._vs.cache = {"dashboard": "x", "openclaw": "old", "latest": "", "gateway": {}}
+        sm._vs.at = 0.0  # force expiry
+        sm._vs.refreshing = False
+
+        def _boom():
+            raise RuntimeError("subprocess exploded")
+
+        with patch.object(sm, "_collect_versions", side_effect=_boom):
+            # Should not raise — returns stale
+            got = sm._get_versions_cached()
+
+        self.assertFalse(sm._vs.refreshing,
+            "refreshing flag must be reset even when _collect_versions raises")
+        # Should return old cache as fallback
+        self.assertEqual(got.get("openclaw"), "old")
 
 
 if __name__ == "__main__":

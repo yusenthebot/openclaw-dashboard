@@ -33,6 +33,7 @@ class _VersionsState:
     lock = threading.Lock()
     cache: Optional[dict] = None
     at: float = 0.0
+    refreshing: bool = False  # True while a thread is calling _collect_versions
 
 _ms = _MetricsState()
 _vs = _VersionsState()
@@ -247,7 +248,7 @@ def _collect_cpu_darwin() -> dict:
 def _collect_cpu_linux() -> dict:
     cores = os.cpu_count() or 1
     s1 = _read_proc_stat()
-    time.sleep(0.05)  # 50ms sample — short enough to avoid blocking request threads
+    time.sleep(0.2)   # 200ms sample — parity with Go; provides stable readings
     s2 = _read_proc_stat()
     if s1 is None or s2 is None:
         return {"percent": 0.0, "cores": cores, "error": "could not read /proc/stat"}
@@ -354,17 +355,40 @@ def _collect_disk(path: str) -> dict:
 # ── Versions ───────────────────────────────────────────────────────────────
 
 def _get_versions_cached() -> dict:
+    """Return cached versions, collecting fresh data when the TTL has expired.
+
+    Uses a double-checked lock with a ``refreshing`` flag (parity with Go's
+    ``getVersionsCached``) to prevent a thundering herd: when multiple threads
+    arrive simultaneously after cache expiry only ONE calls ``_collect_versions``;
+    the others return the previous stale data immediately.
+    """
     ttl = _cfg.get("versionsTtlSeconds", 300)
     now = time.monotonic()
+
     with _vs.lock:
+        # Fast path: cache hit
         if _vs.cache is not None and (now - _vs.at) < ttl:
             return dict(_vs.cache)
+        # Thundering-herd guard: another thread is already refreshing — return stale
+        if _vs.refreshing:
+            return dict(_vs.cache) if _vs.cache is not None else {}
+        # Claim the refresh slot before releasing the lock
+        _vs.refreshing = True
 
-    v = _collect_versions()
+    # Collect outside the lock (subprocess calls — must not hold lock during I/O)
+    try:
+        v = _collect_versions()
+    except Exception:
+        _log.exception("[system] _collect_versions failed")
+        v = None
+
     with _vs.lock:
-        _vs.cache = v
-        _vs.at = time.monotonic()
-    return v
+        if v is not None:
+            _vs.cache = v
+            _vs.at = time.monotonic()
+        _vs.refreshing = False
+
+    return v if v is not None else (dict(_vs.cache) if _vs.cache else {})
 
 
 def _versionish_sort_key(value: str):
@@ -505,8 +529,8 @@ def _collect_openclaw_runtime(oc_bin: str, versions: dict) -> dict:
     """Collect live OpenClaw runtime observability for /api/system.openclaw.
     Partial failures are expected and reported in openclaw.errors.
 
-    All 4 subcollectors (gateway probes, status, channels, bindings) run in
-    parallel via ThreadPoolExecutor — parity with Go's sync.WaitGroup approach.
+    Both subcollectors (gateway probes, status) run in parallel via
+    ThreadPoolExecutor — parity with Go's sync.WaitGroup approach.
     """
     from concurrent.futures import ThreadPoolExecutor
     timeout_s = max(_cfg.get("gatewayTimeoutMs", 1500) / 1000, 0.2)

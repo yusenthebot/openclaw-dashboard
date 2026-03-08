@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -78,9 +77,18 @@ func (s *SystemService) GetJSON(ctx context.Context) (int, []byte) {
 		b := s.metricsPayload
 		s.metricsMu.Unlock()
 
-		// Mark stale in response — byte-level replacement avoids unmarshal/remarshal overhead
-		staleBytes := bytes.Replace(b, []byte(`"stale":false`), []byte(`"stale":true`), 1)
-		return http.StatusOK, staleBytes
+		// Mark stale in response — use JSON round-trip for safety instead of fragile byte
+		// replacement. Byte-level replace silently fails if JSON ordering/spacing differs (B2 fix).
+		var sr SystemResponse
+		if err := json.Unmarshal(b, &sr); err == nil {
+			sr.Stale = true
+			if sb, err := json.Marshal(sr); err == nil {
+				return http.StatusOK, sb
+			}
+		}
+		// Fallback: serve original payload (stale field inaccurate but data still useful)
+		log.Printf("[system] stale injection: could not round-trip JSON, serving original")
+		return http.StatusOK, b
 	}
 
 	// No cache — collect synchronously
@@ -246,14 +254,17 @@ func collectVersions(ctx context.Context, dashVer string, timeoutMs int, gateway
 		v.Openclaw = strings.TrimPrefix(strings.TrimSpace(out), "openclaw ")
 	}
 
-	// Gateway status — use --json flag for reliable parsing
+	// Gateway status — use --json flag for reliable parsing.
+	// I2 fix: attempt to parse stdout even on non-zero exit — many CLIs emit valid JSON
+	// to stdout while exiting non-zero (e.g., gateway offline but status successfully queried).
 	gw := SystemGateway{Status: "unknown"}
 	gwOut, err := runWithTimeout(ctx, timeoutMs, oclawBin, "gateway", "status", "--json")
-	if err != nil {
-		// Fallback: check if gateway process is reachable via HTTP
-		gw = detectGatewayFallback(ctx, gatewayPort, timeoutMs)
-	} else {
+	if gwOut != "" {
 		gw = parseGatewayStatusJSON(ctx, gwOut)
+	}
+	if err != nil && gw.Status == "unknown" {
+		// stdout had no usable JSON — fall back to HTTP probe
+		gw = detectGatewayFallback(ctx, gatewayPort, timeoutMs)
 	}
 	v.Gateway = gw
 
@@ -293,13 +304,17 @@ func collectOpenclawRuntime(ctx context.Context, oclawBin string, timeoutMs int,
 	go func() {
 		defer wg.Done()
 		out, err := runWithTimeout(ctx, timeoutMs, oclawBin, "status", "--json")
+		// I2 fix: attempt to parse stdout even on non-zero exit — matching Python parity where
+		// subprocess stdout is parsed regardless of returncode. Many CLIs emit valid JSON to
+		// stdout while exiting non-zero (e.g., status reported but gateway connect failed).
+		if out != "" {
+			if parsed, parseErr := parseOpenclawStatusJSON(out, versions); parseErr == nil {
+				status = parsed
+				statusFresh = stamp()
+			}
+		}
 		if err != nil {
 			statusErr = fmt.Errorf("status --json: %w", err)
-			return
-		}
-		status, statusErr = parseOpenclawStatusJSON(out, versions)
-		if statusErr == nil {
-			statusFresh = stamp()
 		}
 	}()
 	wg.Wait()
@@ -310,7 +325,10 @@ func collectOpenclawRuntime(ctx context.Context, oclawBin string, timeoutMs int,
 	}
 	if statusErr != nil {
 		openclaw.Errors = append(openclaw.Errors, statusErr.Error())
-	} else {
+	}
+	// I2 fix: apply parsed status data regardless of error — stdout may have useful
+	// data even on non-zero exit. statusFresh is non-empty only when parse succeeded.
+	if statusFresh != "" {
 		openclaw.Status = status
 	}
 	openclaw.Freshness = SystemOpenclawFreshness{

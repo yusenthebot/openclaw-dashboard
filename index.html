@@ -1443,14 +1443,41 @@ const SystemBar = {
   _timer: null, _inflight: false,
   cls(p, w, c) { return p==null?'sys-err':p>=c?'sys-crit':p>=w?'sys-warn':'sys-ok'; },
   fmt(b) { if(!b)return'0B'; const g=b/1073741824; return g>=1?g.toFixed(1)+'GB':(b/1048576).toFixed(0)+'MB'; },
+  fmtDurationMs(ms){
+    if(!ms||ms<=0)return'—';
+    const s=Math.floor(ms/1000);
+    if(s<60)return s+'s';
+    const m=Math.floor(s/60);
+    if(m<60)return m+'m';
+    const h=Math.floor(m/60);
+    if(h<24)return h+'h';
+    return Math.floor(h/24)+'d';
+  },
+  _versionTriplet(v) {
+    const cleaned=String(v||'').trim().replace(/^openclaw\s+/i,'').split(/[+-]/,1)[0];
+    const m=cleaned.match(/^(\d+)\.(\d+)\.(\d+)/);
+    return m?[Number(m[1]),Number(m[2]),Number(m[3])]:null;
+  },
   _versionsBehind(installed, latest) {
-    // YYYY.M.D version scheme — count how many releases behind
-    const parse=v=>{const p=v.split('.').map(Number);return p.length>=3?p:[0,0,0];};
-    const [iy,im,id]=parse(installed),[ly,lm,ld]=parse(latest);
+    // YYYY.M.D version scheme — ignore beta/dev/build suffixes for comparison.
+    const inst=this._versionTriplet(installed), lat=this._versionTriplet(latest);
+    if(!inst||!lat)return 0;
+    const [iy,im,id]=inst,[ly,lm,ld]=lat;
     if(iy===ly&&im===lm&&id===ld)return 0;
     if(iy<ly)return 2;if(iy>ly)return 0;
     if(im<lm)return(lm-im)>=2?2:1;if(im>lm)return 0;
     return(ld-id)>=2?2:1;
+  },
+  _gatewayState(d) {
+    const gwRuntime=d.openclaw?.gateway||{};
+    const gwVersion=d.versions?.gateway||{};
+    const runtimeTrusted=!!(gwRuntime.healthEndpointOk||gwRuntime.readyEndpointOk||(gwRuntime.uptimeMs||0)>0||((gwRuntime.failing||[]).length>0));
+    if(runtimeTrusted){
+      const live=!!gwRuntime.live,ready=!!gwRuntime.ready;
+      return {source:'runtime',ok:live&&ready,live,ready};
+    }
+    const status=String(gwVersion.status||'').toLowerCase();
+    return {source:'versions',ok:['online','running'].includes(status),live:['online','running'].includes(status),ready:['online','running'].includes(status)};
   },
   render(d) {
     const bar=$('systemTopBar'); if(!d){bar.style.display='none';return;}
@@ -1470,16 +1497,51 @@ const SystemBar = {
     sp('sysRam','RAM',ramErr?null:(d.ram?.percent??null),tRam,!ramErr&&d.ram?.totalBytes>0?'RAM '+this.fmt(d.ram.usedBytes)+'/'+this.fmt(d.ram.totalBytes):null);
     sp('sysSwap','Swap',swapErr?null:(d.swap?.percent??null),tSwap);
     sp('sysDisk','Disk',d.disk?.error?null:(d.disk?.percent??null),tDisk,d.disk?.totalBytes>0?'Disk used '+this.fmt(d.disk.usedBytes)+'/'+this.fmt(d.disk.totalBytes)+' ('+d.disk.percent.toFixed(1)+'%)':null);
-    const oc=$('sysOclaw');const inst=d.versions?.openclaw||'?';const latest=d.versions?.latest||'';
+    const ocData=d.openclaw||{};
+    const ocStatus=ocData.status||{};
+    const inst=ocStatus.currentVersion||d.versions?.openclaw||'?';
+    const latest=ocStatus.latestVersion||d.versions?.latest||'';
+    const oc=$('sysOclaw');
     let ocClass='sys-ok';
     if(latest&&inst!=='?'&&inst!==latest){const behind=this._versionsBehind(inst,latest);ocClass=behind>=2?'sys-err':behind===1?'sys-warn':'sys-ok';}
-    oc.className='sys-pill '+ocClass;oc.textContent='OpenClaw '+inst+(latest&&inst!==latest?' (latest: '+latest+')':'');
-    const gwok=['online','running'].includes(d.versions?.gateway?.status);
-    // Set global flag so Renderer.render() can skip re-creating the "Gateway is offline" alert
-    window._gwOnlineConfirmed = gwok;
+    const latency=ocStatus.connectLatencyMs?(' · '+ocStatus.connectLatencyMs+'ms'):'';
+    oc.className='sys-pill '+ocClass;
+    oc.textContent='OpenClaw '+inst+latency+(latest&&inst!==latest?' (latest: '+latest+')':'');
+
+    const gwRuntime=ocData.gateway||{};
+    const gwVersion=d.versions?.gateway||{};
+    const gwState=this._gatewayState(d);
+    const gwLive=!!gwState.live;
+    const gwReady=!!gwState.ready;
+    const gwok=!!gwState.ok;
+    // Set global flag so Renderer.render() can skip re-creating the "Gateway is offline" alert.
+    // "Live but not ready" is degraded, but not offline.
+    window._gwOnlineConfirmed = gwLive;
     $('sysStale').style.display=d.stale?'inline':'none';
-    // Also update health panel gateway from /api/system (more reliable than refresh.sh)
-    if(d.versions?.gateway){const gwSys=d.versions.gateway;const gwOn=['online','running'].includes(gwSys.status);$('hGw').innerHTML=gwOn?'<span style="color:var(--green)">●</span> Online':'<span style="color:var(--red)">●</span> Offline';$('hGw').style.color='var(--textStrong)';if(gwSys.pid)$('hPid').textContent=gwSys.pid;if(gwSys.uptime)$('hUp').textContent=gwSys.uptime;if(gwSys.memory)$('hMem').textContent=gwSys.memory;if(gwOn){const as=$('alertsSection');if(as){const items=as.querySelectorAll('.alert-item');items.forEach(el=>{if(el.textContent.includes('Gateway is offline'))el.remove();})}}}
+
+    // Also update health panel gateway from /api/system (runtime-first when trustworthy, versions fallback otherwise)
+    if(gwState.source==='runtime'){
+      if(gwLive&&gwReady){
+        $('hGw').innerHTML='<span style="color:var(--green)">●</span> Online';
+      }else if(gwLive&&!gwReady){
+        $('hGw').innerHTML='<span style="color:var(--yellow)">●</span> Live / Not Ready';
+      }else{
+        $('hGw').innerHTML='<span style="color:var(--red)">●</span> Offline';
+      }
+    }else{
+      $('hGw').innerHTML=gwok?'<span style="color:var(--green)">●</span> Online':'<span style="color:var(--red)">●</span> Offline';
+    }
+    $('hGw').style.color='var(--textStrong)';
+    if(gwVersion.pid)$('hPid').textContent=gwVersion.pid;
+    if(gwState.source==='runtime'){
+      const upTxt=this.fmtDurationMs(gwRuntime.uptimeMs);
+      $('hUp').textContent=upTxt!=='—'?upTxt:(gwVersion.uptime||'—');
+    } else if(gwVersion.uptime) {
+      $('hUp').textContent=gwVersion.uptime;
+    }
+    if(gwVersion.memory)$('hMem').textContent=gwVersion.memory;
+    if(gwok){const as=$('alertsSection');if(as){const items=as.querySelectorAll('.alert-item');items.forEach(el=>{if(el.textContent.includes('Gateway is offline'))el.remove();})}}
+
     if(d.pollSeconds&&d.pollSeconds>0&&d.pollSeconds*1000!==this._lastMs)this.start(d.pollSeconds*1000);
   },
   async fetch() {

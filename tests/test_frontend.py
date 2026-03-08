@@ -4,8 +4,10 @@ Uses only re and string operations to validate HTML/JS/shell patterns.
 No browser or JS runtime needed.
 """
 
+import json
 import os
 import re
+import subprocess
 import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,6 +19,25 @@ REFRESH_SH = os.path.join(REPO, "refresh.sh")
 def read(path):
     with open(path) as f:
         return f.read()
+
+
+def eval_systembar(expr):
+    script = """\
+const fs = require('fs');
+const vm = require('vm');
+const html = fs.readFileSync(__INDEX_HTML__, 'utf8');
+const start = html.indexOf('const SystemBar = {');
+if (start < 0) throw new Error('SystemBar object not found');
+const end = html.indexOf('\\n};', start);
+if (end < 0) throw new Error('SystemBar terminator not found');
+const source = html.slice(start, end + 3);
+const sandbox = { window: {}, console, globalThis: {} };
+vm.createContext(sandbox);
+vm.runInContext(source + '\\nglobalThis.__result = (' + __EXPR__ + ');', sandbox);
+process.stdout.write(JSON.stringify(sandbox.globalThis.__result));
+""".replace('__INDEX_HTML__', json.dumps(INDEX_HTML)).replace('__EXPR__', json.dumps(expr))
+    out = subprocess.check_output(["node", "-e", script], text=True)
+    return json.loads(out)
 
 
 class TestFrontendJS(unittest.TestCase):
@@ -91,6 +112,33 @@ class TestFrontendJS(unittest.TestCase):
         self.assertIn("_svgCache", self.html)
         self.assertIn("patchSvg(", self.html)
 
+    def test_versions_behind_ignores_beta_and_dev_suffixes(self):
+        self.assertEqual(eval_systembar("SystemBar._versionsBehind('2026.3.5-beta-runtime-observability','2026.3.5')"), 0)
+        self.assertEqual(eval_systembar("SystemBar._versionsBehind('2026.3.5-dev.1','2026.3.6')"), 1)
+        self.assertEqual(eval_systembar("SystemBar._versionsBehind('2026.3.3-beta.2','2026.3.5')"), 2)
+
+    def test_gateway_falls_back_to_versions_when_runtime_is_untrustworthy(self):
+        payload = {
+            "openclaw": {"gateway": {"live": False, "ready": False}},
+            "versions": {"gateway": {"status": "online", "pid": 321, "uptime": "2h", "memory": "64MB"}},
+        }
+        result = eval_systembar(f"SystemBar._gatewayState({json.dumps(payload)})")
+        self.assertEqual(result["source"], "versions")
+        self.assertTrue(result["ok"])
+
+    def test_gateway_prefers_runtime_when_probe_data_is_trustworthy(self):
+        payload = {
+            "openclaw": {"gateway": {"healthEndpointOk": True, "live": True, "ready": False}},
+            "versions": {"gateway": {"status": "online"}},
+        }
+        result = eval_systembar(f"SystemBar._gatewayState({json.dumps(payload)})")
+        self.assertEqual(result["source"], "runtime")
+        self.assertFalse(result["ok"])
+
+    def test_gateway_live_not_ready_label_present(self):
+        self.assertIn("Live / Not Ready", self.html)
+        self.assertIn("window._gwOnlineConfirmed = gwLive", self.html)
+
 
 class TestRefreshShSafety(unittest.TestCase):
     """AC21-AC22, AC24: refresh.sh safety checks."""
@@ -140,6 +188,65 @@ class TestServerSafety(unittest.TestCase):
         self.assertEqual(len(wildcard_patterns), 0, "Found CORS wildcard * in server.py")
         # Also check no "*, " pattern
         self.assertNotIn('"*"', self.server.split("Access-Control-Allow-Origin")[-1][:50] if "Access-Control-Allow-Origin" in self.server else "")
+
+
+class TestGatewayPillRemoved(unittest.TestCase):
+    """Verify the duplicate GW pill was removed from the top bar (not System Health)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = read(INDEX_HTML)
+
+    def test_no_sysGateway_element_in_top_bar(self):
+        """sysGateway span must not exist in the HTML (duplicate top-bar pill removed)."""
+        self.assertNotIn('id="sysGateway"', self.html,
+            "sysGateway pill was supposed to be removed from the top bar")
+
+    def test_system_health_gateway_still_present(self):
+        """System Health gateway row (hGw) must still be rendered."""
+        self.assertIn('id="hGw"', self.html,
+            "System Health gateway indicator (hGw) should still be present")
+
+    def test_no_gwPill_update_in_js(self):
+        """The gwPill DOM manipulation JS should have been removed."""
+        self.assertNotIn("gwPill.className", self.html,
+            "gwPill.className assignment should have been removed")
+        self.assertNotIn("gwPill.textContent", self.html,
+            "gwPill.textContent assignment should have been removed")
+        self.assertNotIn("$('sysGateway')", self.html,
+            "$('sysGateway') reference should have been removed")
+
+    def test_gwOnlineConfirmed_flag_still_set(self):
+        """window._gwOnlineConfirmed must still be set (used by Renderer to suppress alerts)."""
+        self.assertIn("window._gwOnlineConfirmed", self.html,
+            "_gwOnlineConfirmed flag must still be set for alert suppression")
+
+    def test_system_health_still_updates_hGw(self):
+        """SystemBar.render() must still update hGw in the System Health panel."""
+        self.assertIn("$('hGw').innerHTML", self.html,
+            "System Health hGw update must still be present")
+
+
+class TestNoRawPlaceholderTokens(unittest.TestCase):
+    """Verify that index.html does not contain raw template placeholder tokens.
+    Such tokens indicate a failed template substitution that would expose
+    implementation details or break the UI."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = read(INDEX_HTML)
+
+    def test_no_double_brace_placeholders(self):
+        """No {{ ... }} template placeholders should remain in the served HTML."""
+        raw_placeholders = re.findall(r'\{\{[A-Z_][A-Z0-9_]*\}\}', self.html)
+        self.assertEqual(raw_placeholders, [],
+            f"Found raw placeholder tokens in index.html: {raw_placeholders}")
+
+    def test_no_percent_placeholders(self):
+        """No %PLACEHOLDER% style tokens should remain in the served HTML."""
+        raw_placeholders = re.findall(r'%[A-Z_][A-Z0-9_]*%', self.html)
+        self.assertEqual(raw_placeholders, [],
+            f"Found raw %%PLACEHOLDER%% tokens in index.html: {raw_placeholders}")
 
 
 if __name__ == "__main__":
