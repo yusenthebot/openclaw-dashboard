@@ -66,15 +66,18 @@ Two server options — choose what fits your environment:
 |---|---|---|
 | **Install** | Download one file | Clone repo + Python 3 |
 | **Runtime deps** | None | Python 3.6+ |
-| **Throughput** | 37,063 req/s | 940 req/s |
-| **Deploy size** | 6.2 MB | ~81 MB (Python framework) |
+| **Throughput** | ~2,019 req/s | 1,745 req/s |
+| **Deploy size** | 9.5 MB (arm64), 10 MB (amd64) | ~81 MB (Python framework) |
 | **Best for** | Production, headless, containers | Quick setup, customization |
 
-> See [BENCHMARK.md](BENCHMARK.md) for the full 9-category performance comparison.
+> Go now ships as the same release artifact family as `v2026.3.8` and continues to include runtime-observability features.
+> For reproducible numbers, see the latest entry in [BENCHMARK.md](BENCHMARK.md) (Go vs Python, `/api/system`, 20k requests @ 200 concurrency).
 
 ### Option A: Go Binary (recommended)
 
-Download a single pre-built binary — no runtime dependencies needed:
+Download a single pre-built binary — no runtime dependencies needed.
+
+> Note: latest release assets are versioned as `openclaw-dashboard-<platform>-<arch>`, while the `latest/download/...` links below always point to the current release.
 
 ```bash
 # macOS (Apple Silicon)

@@ -1,5 +1,56 @@
 # OpenClaw Dashboard — Benchmark Report: Go vs Python
 
+## 2026-03-09 Re-benchmark (v2026.3.8)
+
+> **Date:** 2026-03-09
+> **Environment:** macOS 26.3, Apple Silicon (arm64), Go 1.26.1, Python 3.14.3
+> **Go binary:** `openclaw-dashboard` (v2026.3.8, arm64, 9.5 MB)
+> **Python:** `server.py` via stdlib `threading/requests` harness
+
+### Benchmark command used
+
+```bash
+python3 /tmp/benchmark_go_vs_py.py --requests 20000 --conc 200
+python3 /tmp/benchmark_go_vs_py.py --requests 10000 --conc 100 --go http://127.0.0.1:8080/ --py http://127.0.0.1:9090/
+```
+
+The Go server was running on `127.0.0.1:8080` and Python on `127.0.0.1:9090` on the same host.
+
+### Summary (`/api/system`)
+
+| Metric | Go | Python | Delta |
+|---|---:|---:|---:|
+| Requests | 20,000 | 20,000 | — |
+| Concurrency | 200 | 200 | — |
+| Total time | 9.907s | 11.605s | +1.70s |
+| Throughput | 2,018.74 req/s | 1,723.44 req/s | **1.17× faster** |
+| Avg latency | 82.638 ms | 102.463 ms | -19.3 ms |
+| p95 | 166.306 ms | 193.564 ms | -27.3 ms |
+| p99 | 214.515 ms | 253.554 ms | -39.0 ms |
+| Max | 364.619 ms | 472.451 ms | -107.8 ms |
+| Errors | 0 | 0 | — |
+
+### Supplemental (`/`)
+
+| Metric | Go | Python | Delta |
+|---|---:|---:|---:|
+| Requests | 10,000 | 10,000 | — |
+| Concurrency | 100 | 100 | — |
+| Total time | 5.263s | 5.729s | +0.47s |
+| Throughput | 1,900.21 req/s | 1,745.47 req/s | **1.09× faster** |
+| Avg latency | 50.097 ms | 54.506 ms | -4.409 ms |
+| p95 | 90.184 ms | 93.187 ms | -3.003 ms |
+| p99 | 112.646 ms | 116.488 ms | -3.842 ms |
+| Max | 162.183 ms | 185.005 ms | -22.822 ms |
+
+### Conclusion
+
+Go remains slightly ahead under sustained concurrent reads in this environment, with lower average and tail latency and ~17% higher throughput on `/api/system` at the tested load.
+
+---
+
+## Historical benchmark (2026-03-03)
+
 > **Date:** 2026-03-03
 > **Environment:** macOS 26.3, Apple Silicon (arm64), Go 1.26, Python 3.9
 > **Go binary:** `openclaw-dashboard` v2026.2.28.1 (6.2MB, optimised, stdlib only)
