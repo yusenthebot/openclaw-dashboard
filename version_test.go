@@ -39,3 +39,31 @@ func TestDetectVersion_EmptyVersionFile(t *testing.T) {
 		t.Fatalf("expected dev for empty VERSION file, got %s", v)
 	}
 }
+
+func TestResolveRepoRoot_Direct(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "refresh.sh"), []byte("#!/bin/sh\n"), 0644); err != nil {
+		t.Fatalf("write refresh.sh: %v", err)
+	}
+
+	got := resolveRepoRoot(dir)
+	if got != dir {
+		t.Fatalf("expected %s, got %s", dir, got)
+	}
+}
+
+func TestResolveRepoRoot_DistSubdir(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "refresh.sh"), []byte("#!/bin/sh\n"), 0644); err != nil {
+		t.Fatalf("write refresh.sh: %v", err)
+	}
+	dist := filepath.Join(repo, "dist")
+	if err := os.MkdirAll(dist, 0755); err != nil {
+		t.Fatalf("mkdir dist: %v", err)
+	}
+
+	got := resolveRepoRoot(dist)
+	if got != repo {
+		t.Fatalf("expected repo root %s, got %s", repo, got)
+	}
+}

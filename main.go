@@ -25,7 +25,8 @@ func main() {
 		exe = "."
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
-	dir := filepath.Dir(exe)
+	binDir := filepath.Dir(exe)
+	dir := resolveRepoRoot(binDir)
 
 	version := detectVersion(dir)
 	cfg := loadConfig(dir)
