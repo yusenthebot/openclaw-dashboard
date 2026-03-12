@@ -733,7 +733,7 @@ td.w { font-weight:600; color:var(--textStrong); }
       <div class="theme-menu" id="themeMenu"></div>
     </div>
     <button class="btn-terminal" onclick="OCUI.refresh()">↻ Sync</button>
-    <button class="btn-terminal" onclick="Chat.toggle()">⌥ AI</button>
+    
   </div>
 </header>
 
@@ -1132,7 +1132,7 @@ td.w { font-weight:600; color:var(--textStrong); }
       <span class="section-title">// Live Logs</span><span class="oc-chevron">▼</span>
     </button>
   </div>
-  <div class="oc-section-body" id="oc-body-live-logs" style="display:none">
+  <div class="oc-section-body" id="oc-body-live-logs">
     <div class="log-controls">
       <button class="log-ctrl-btn" id="logClearBtn" onclick="LiveLogs.clear()">Clear</button>
       <button class="log-ctrl-btn active" id="logPauseBtn" onclick="LiveLogs.togglePause()">⏸ Pause</button>
@@ -1173,30 +1173,12 @@ td.w { font-weight:600; color:var(--textStrong); }
 <div class="toast-container" id="toastContainer"></div>
 
 <!-- ===== CHAT FAB ===== -->
-<button class="chat-fab" onclick="Chat.toggle()" title="AI Chat">⌥</button>
-<div class="chat-panel" id="chatPanel">
-  <div class="chat-header">
-    <span class="chat-header-title">// AI QUERY</span>
-    <button class="chat-close" onclick="Chat.toggle()">✕</button>
-  </div>
-  <div class="chat-messages" id="chatMessages"></div>
-  <div class="chat-quick">
-    <button class="chat-chip" onclick="Chat.quick('What is my total cost today?')">cost today</button>
-    <button class="chat-chip" onclick="Chat.quick('Which cron jobs failed recently?')">failed crons</button>
-    <button class="chat-chip" onclick="Chat.quick('Show active sessions')">sessions</button>
-  </div>
-  <div class="chat-input-row">
-    <input class="chat-input" id="chatInput" placeholder="query..." type="text" onkeydown="if(event.key==='Enter')Chat.send()">
-    <button class="chat-send" id="chatSend" onclick="Chat.send()">Send</button>
-  </div>
-</div>
-
 
 <script>
 // FOUC bootstrap: read localStorage before body renders to prevent flash
 (function(){
   var STORAGE_KEY='ocDash:collapse:v2';
-  var DEFAULTS={'alerts':false,'health':false,'cost':false,'stats2':false,'charts':false,'crons':false,'sessions':false,'usage':false,'subagent':false,'agent-config':false,'resources':true};
+  var DEFAULTS={'alerts':false,'quick-actions':false,'health':false,'cost':false,'stats2':false,'charts':false,'crons':false,'sessions':false,'usage':false,'subagent':false,'agent-config':false,'resources':true,'live-logs':true};
   var state=Object.assign({},DEFAULTS);
   try{
     var raw=localStorage.getItem(STORAGE_KEY);
@@ -2311,11 +2293,11 @@ const SystemBar = {
 };
 
 // === Collapsible Sections ===
-const SECTION_KEYS = ['alerts','health','cost','stats2','charts','crons','sessions','usage','subagent','agent-config','resources'];
+const SECTION_KEYS = ['alerts','quick-actions','health','cost','stats2','charts','crons','sessions','usage','subagent','agent-config','resources','live-logs'];
 const Sections = {
   _state: {},
   STORAGE_KEY: 'ocDash:collapse:v2',
-  DEFAULTS: {'alerts':false,'health':false,'cost':false,'stats2':false,'charts':false,'crons':false,'sessions':false,'usage':false,'subagent':false,'agent-config':false,'resources':true},
+  DEFAULTS: {'alerts':false,'quick-actions':false,'health':false,'cost':false,'stats2':false,'charts':false,'crons':false,'sessions':false,'usage':false,'subagent':false,'agent-config':false,'resources':true,'live-logs':true},
 
   loadState() {
     var merged = Object.assign({}, this.DEFAULTS);
@@ -2352,6 +2334,10 @@ const Sections = {
     this._state[key] = !this._state[key];
     this._apply(key, this._state[key]);
     this.saveState();
+    // Start LiveLogs EventSource on first expand
+    if (key === 'live-logs' && !this._state[key]) {
+      if (typeof LiveLogs !== 'undefined') LiveLogs.init();
+    }
   },
 
   setAll(collapsed) {
@@ -2879,13 +2865,7 @@ Renderer.renderCronGrid = function(crons) {
   QuickActions.populateCrons(crons);
 };
 
-// Update SECTION_KEYS to include new sections
-SECTION_KEYS.push('quick-actions', 'live-logs');
-Sections.DEFAULTS['quick-actions'] = false;
-Sections.DEFAULTS['live-logs'] = true;
-
 App.init();
-LiveLogs.init();
 
 // === OCUI ===
 window.OCUI = {

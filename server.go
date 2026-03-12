@@ -780,7 +780,47 @@ func (s *Server) handleLogsStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Tail each source from end
+	// Helper: send last N lines from a file as SSE history burst
+	sendHistory := func(path, source string, nLines int) int64 {
+		f, err := os.Open(path)
+		if err != nil {
+			return 0
+		}
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil {
+			return 0
+		}
+		size := info.Size()
+		if size == 0 {
+			return 0
+		}
+		// Read up to last 64KB for history
+		readSize := int64(65536)
+		if size < readSize {
+			readSize = size
+		}
+		buf := make([]byte, readSize)
+		f.ReadAt(buf, size-readSize)
+		raw := string(buf)
+		lines := strings.Split(raw, "\n")
+		// Take last nLines non-empty lines
+		var tail []string
+		for i := len(lines) - 1; i >= 0 && len(tail) < nLines; i-- {
+			if strings.TrimSpace(lines[i]) != "" {
+				tail = append([]string{lines[i]}, tail...)
+			}
+		}
+		now := time.Now().Format(time.RFC3339)
+		for _, line := range tail {
+			payload, _ := json.Marshal(map[string]string{"ts": now, "line": line, "source": source})
+			fmt.Fprintf(w, "data: %s\n\n", payload)
+		}
+		flusher.Flush()
+		return size
+	}
+
+	// Tail each source — send history first, then stream new lines
 	type tailState struct {
 		path   string
 		source string
@@ -788,11 +828,7 @@ func (s *Server) handleLogsStream(w http.ResponseWriter, r *http.Request) {
 	}
 	var tails []tailState
 	for _, src := range sources {
-		info, err := os.Stat(src.path)
-		offset := int64(0)
-		if err == nil {
-			offset = info.Size()
-		}
+		offset := sendHistory(src.path, src.source, 100)
 		tails = append(tails, tailState{path: src.path, source: src.source, offset: offset})
 	}
 
