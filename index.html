@@ -86,71 +86,75 @@ body::after {
 
 /* ── Header ── */
 .hdr {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 24px 0 0;
   margin-bottom: 16px;
-  background: rgba(38,30,14,0.98);
-  border-top: 1px solid var(--border);
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid rgba(168,184,122,0.3);
-  border-left: 4px solid var(--accent);
-  position: relative;
-  min-height: 64px;
-}
-.hdr-left { display: flex; align-items: stretch; gap: 0; }
-.hdr-brand {
-  display: flex;
-  align-items: center;
-  padding: 0 28px 0 22px;
-  border-right: 1px solid var(--border);
+  background: rgba(34,27,12,0.99);
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  min-height: 60px;
   gap: 0;
 }
-.hdr-title-col { display: flex; flex-direction: column; justify-content: center; }
-.hdr-logo {
+/* Left: identity block */
+.hdr-left {
   display: flex;
-  align-items: baseline;
-  gap: 9px;
-  line-height: 1;
+  flex-direction: column;
+  justify-content: center;
+  padding: 12px 32px 12px 24px;
+  border-right: 1px solid var(--border);
+  gap: 4px;
+  min-width: 260px;
 }
-.hdr-agent-name {
-  font-size: 20px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  color: var(--textStrong);
-  font-family: 'JetBrains Mono', monospace;
-}
-.hdr-sep {
-  font-size: 13px;
-  color: var(--accent);
-  font-weight: 300;
-  opacity: 0.7;
-  letter-spacing: 0.05em;
-}
-.hdr-ctrl {
-  font-size: 13px;
-  color: var(--accent);
-  font-weight: 500;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-}
-.hdr-subtitle {
-  font-size: 9.5px;
-  color: rgba(168,184,122,0.55);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  margin-top: 5px;
-  font-weight: 400;
-}
-.hdr-status-group {
+.hdr-name-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 20px;
-  border-right: 1px solid var(--border);
 }
-.hdr-right { display: flex; align-items: center; gap: 14px; padding-left: 20px; }
+.hdr-agent-name {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  color: var(--textStrong);
+  line-height: 1;
+  font-family: 'JetBrains Mono', monospace;
+}
+.hdr-badge {
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid rgba(168,184,122,0.35);
+  padding: 3px 9px 2px;
+  background: rgba(168,184,122,0.06);
+  line-height: 1.4;
+  align-self: center;
+}
+.hdr-subtitle {
+  font-size: 9px;
+  color: rgba(168,184,122,0.4);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-weight: 400;
+  line-height: 1;
+}
+/* Center: status + billing — flex-centered */
+.hdr-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 0 28px;
+}
+/* Right: timestamp + controls */
+.hdr-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 24px;
+  border-left: 1px solid var(--border);
+}
 .btn-terminal {
   background: transparent;
   border: 1px solid rgba(168,184,122,0.35);
@@ -735,25 +739,23 @@ td.w { font-weight:600; color:var(--textStrong); }
 
 <!-- ===== HEADER ===== -->
 <header class="hdr">
+  <!-- identity -->
   <div class="hdr-left">
-    <div class="hdr-brand">
-      <div class="hdr-title-col">
-        <div class="hdr-logo">
-          <span class="hdr-agent-name" id="botName">WILL</span>
-          <span class="hdr-sep">//</span>
-          <span class="hdr-ctrl">CONTROL</span>
-        </div>
-        <div class="hdr-subtitle">OpenClaw Gateway &nbsp;&middot;&nbsp; v__VERSION__</div>
-      </div>
+    <div class="hdr-name-row">
+      <span class="hdr-agent-name" id="botName">WILL</span>
+      <span class="hdr-badge">CONTROL</span>
     </div>
-    <div class="hdr-status-group">
-      <div class="status-badge">
-        <div class="status-dot"></div>
-        <span>ONLINE</span>
-      </div>
-      <div id="billingBadge" class="billing-badge billing-api" title="Billing mode" onclick="BillingMode.cycle()" style="cursor:pointer"></div>
-    </div>
+    <span class="hdr-subtitle">OpenClaw Gateway &nbsp;&middot;&nbsp; v__VERSION__</span>
   </div>
+  <!-- status — center fill -->
+  <div class="hdr-center">
+    <div class="status-badge">
+      <div class="status-dot"></div>
+      <span>ONLINE</span>
+    </div>
+    <div id="billingBadge" class="billing-badge billing-api" title="Billing mode" onclick="BillingMode.cycle()" style="cursor:pointer"></div>
+  </div>
+  <!-- controls -->
   <div class="hdr-right">
     <span class="hdr-meta" id="lastUpdate"></span>
     <div id="countdownWrap"><span class="hdr-meta">REFRESH&nbsp;</span><span class="countdown-val" id="countdown">60s</span></div>
