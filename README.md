@@ -2,7 +2,9 @@
 
 > A terminal-aesthetic control panel for [OpenClaw](https://github.com/openclaw/openclaw) Gateway — real-time agent monitoring, billing-aware cost display, and a warm "Subdued Succulent" dark theme.
 
-![Header & System Status](screenshots/01-header-system.png)
+![Dashboard Overview](screenshots/00-full.jpg)
+
+---
 
 ---
 
@@ -18,6 +20,8 @@ Auto-detects your billing model and shows the right metric — no misleading dol
 | `local` | Token count, $0 API cost |
 
 Click the badge in the header to cycle modes. Preference persists in localStorage.
+
+---
 
 ![Performance Stats & Cost Heatmap](screenshots/02-perf-heatmap.png)
 
