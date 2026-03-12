@@ -2279,6 +2279,7 @@ const SessionChat = {
   _typingEl: null,
   _seenIds: new Set(),
   _connected: false,
+  _lastSentText: null,
 
   init() {
     this._connectSSE();
@@ -2303,6 +2304,13 @@ const SessionChat = {
         // Deduplicate by id
         if (msg.id && this._seenIds.has(msg.id)) return;
         if (msg.id) this._seenIds.add(msg.id);
+        // Skip echo of our own sent message
+        if (msg.role === 'user' && this._lastSentText && msg.text && msg.text.includes(this._lastSentText.slice(0,40))) {
+          this._lastSentText = null;
+          return;
+        }
+        // Skip tool events with no name (empty tool-call markers)
+        if (msg.role === 'tool' && !msg.name) return;
         this._appendBubble(msg.role, msg.text || '', msg.name || '');
       } catch(ex) {}
     };
@@ -2452,8 +2460,10 @@ const SessionChat = {
     this._sending = true;
     if (btn) btn.disabled = true;
 
-    // Show user bubble immediately
-    if (text) this._appendBubble('user', text, '');
+    // Show user bubble immediately (with file list)
+    const fileNames = this._files.map(f => f.url ? '[img: '+f.name+']' : '[file: '+f.name+']');
+    const displayText = [text, ...fileNames].filter(Boolean).join('  ');
+    if (displayText) this._appendBubble('user', displayText, '');
     this._showTyping();
 
     const form = new FormData();
@@ -2463,6 +2473,7 @@ const SessionChat = {
     }
 
     // Clear input and attachments
+    this._lastSentText = displayText; // used to skip SSE echo of our own message
     ta.value = '';
     ta.style.height = 'auto';
     this._files.forEach(f => { if (f.url) URL.revokeObjectURL(f.url); });

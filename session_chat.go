@@ -127,7 +127,7 @@ func parseJSONLLine(line []byte) (*sessionSSEEvent, bool) {
 		return nil, false
 	}
 	role := entry.Message.Role
-	if role == "" || role == "system" {
+	if role == "" || role == "system" || role == "toolResult" || role == "toolCall" {
 		return nil, false
 	}
 
@@ -143,27 +143,33 @@ func parseJSONLLine(line []byte) (*sessionSSEEvent, bool) {
 		Name string `json:"name"`
 	}
 	if err := json.Unmarshal(entry.Message.Content, &blocks); err == nil {
-		// Check for tool_use first
-		for _, b := range blocks {
-			if b.Type == "tool_use" || b.Type == "toolCall" {
-				evt.Role = "tool"
-				evt.Name = b.Name
-				return evt, true
-			}
-		}
-		// Collect text blocks
+		// Collect text blocks first
 		var parts []string
+		var toolName string
+		hasToolCall := false
 		for _, b := range blocks {
 			if b.Type == "text" && b.Text != "" {
 				parts = append(parts, b.Text)
 			}
+			if b.Type == "tool_use" || b.Type == "toolCall" {
+				hasToolCall = true
+				if b.Name != "" {
+					toolName = b.Name
+				}
+			}
 		}
-		evt.Text = strings.Join(parts, "\n")
-		evt.Role = role
-		if evt.Text == "" && evt.Role != "tool" {
-			return nil, false
+		// Prefer text; fall back to tool event only if no text
+		if len(parts) > 0 {
+			evt.Text = strings.Join(parts, "\n")
+			evt.Role = role
+			return evt, true
 		}
-		return evt, true
+		if hasToolCall && role == "assistant" {
+			evt.Role = "tool"
+			evt.Name = toolName
+			return evt, true
+		}
+		return nil, false
 	}
 
 	// Try plain string
