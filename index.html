@@ -558,6 +558,81 @@ body::after {
 .schat-send-btn:hover { background: rgba(168,184,122,0.25); }
 .schat-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .schat-status { font-size: 10px; color: var(--dim); padding: 2px 0; letter-spacing: 0.05em; }
+/* ── Chat Float Window ── */
+.schat-floatwin {
+  position: fixed;
+  bottom: 80px;
+  right: 24px;
+  width: 420px;
+  height: 560px;
+  min-width: 280px;
+  min-height: 300px;
+  z-index: 500;
+  display: none;
+  flex-direction: column;
+  background: rgba(30,24,11,0.98);
+  border: 1px solid rgba(168,184,122,0.35);
+  border-left: 3px solid var(--accent);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.7), 0 0 0 1px rgba(168,184,122,0.08);
+  overflow: visible;
+}
+.schat-floatwin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 12px 7px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: move;
+  user-select: none;
+  flex-shrink: 0;
+  background: rgba(168,184,122,0.04);
+}
+.schat-floatwin-title { font-size: 10px; font-weight: 700; letter-spacing: 0.18em; color: var(--accent); text-transform: uppercase; }
+.schat-floatwin-sub   { font-size: 9px; color: var(--dim); letter-spacing: 0.1em; margin-left: 10px; }
+.schat-floatwin-btns  { display: flex; gap: 4px; }
+.schat-floatwin-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 12px;
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; line-height: 1; transition: all 0.15s;
+}
+.schat-floatwin-btn:hover { border-color: var(--accent); color: var(--accent); }
+.schat-floatwin-btn.close:hover { border-color: var(--red); color: var(--red); }
+.schat-float-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+/* 8-direction resize handles */
+.schat-rh { position: absolute; z-index: 501; }
+.schat-rh[data-resize="n"]  { top:-4px;    left:12px;   right:12px;  height:8px;  cursor:n-resize; }
+.schat-rh[data-resize="s"]  { bottom:-4px; left:12px;   right:12px;  height:8px;  cursor:s-resize; }
+.schat-rh[data-resize="e"]  { top:12px;    right:-4px;  bottom:12px; width:8px;   cursor:e-resize; }
+.schat-rh[data-resize="w"]  { top:12px;    left:-4px;   bottom:12px; width:8px;   cursor:w-resize; }
+.schat-rh[data-resize="nw"] { top:-4px;    left:-4px;   width:12px;  height:12px; cursor:nw-resize; }
+.schat-rh[data-resize="ne"] { top:-4px;    right:-4px;  width:12px;  height:12px; cursor:ne-resize; }
+.schat-rh[data-resize="sw"] { bottom:-4px; left:-4px;   width:12px;  height:12px; cursor:sw-resize; }
+.schat-rh[data-resize="se"] { bottom:-4px; right:-4px;  width:12px;  height:12px; cursor:se-resize; }
+.schat-rh[data-resize="se"]::after {
+  content:''; position:absolute; bottom:5px; right:5px;
+  width:6px; height:6px;
+  border-right:2px solid rgba(168,184,122,0.45);
+  border-bottom:2px solid rgba(168,184,122,0.45);
+}
+/* pop-out button */
+.schat-popout-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+  letter-spacing: 0.08em;
+  margin-right: 8px;
+  transition: all 0.15s;
+}
+.schat-popout-btn:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ── Bottom grid ── */
 .bottom-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
@@ -868,9 +943,10 @@ td.w { font-weight:600; color:var(--textStrong); }
     <button class="oc-section-toggle" aria-expanded="true" aria-controls="oc-body-chat" onclick="Sections.toggle('chat')">
       <span class="section-title">// Chat</span><span class="oc-chevron">▼</span>
     </button>
+    <button class="schat-popout-btn" id="schatPopBtn" onclick="event.stopPropagation();ChatFloat.popOut()" title="Float">&#x229E; Float</button>
   </div>
   <div class="oc-section-body" id="oc-body-chat">
-    <div class="schat-panel">
+    <div class="schat-panel" id="schatPanel">
       <div class="schat-history" id="schatHistory">
         <div class="schat-bubble assistant">Session chat loaded. Send a message to OpenClaw main session.</div>
       </div>
@@ -1228,6 +1304,27 @@ td.w { font-weight:600; color:var(--textStrong); }
 </section>
 
 </div><!-- /#app -->
+<!-- ===== CHAT FLOAT WINDOW ===== -->
+<div class="schat-floatwin" id="schatFloatWin">
+  <div class="schat-rh" data-resize="n"></div>
+  <div class="schat-rh" data-resize="s"></div>
+  <div class="schat-rh" data-resize="e"></div>
+  <div class="schat-rh" data-resize="w"></div>
+  <div class="schat-rh" data-resize="nw"></div>
+  <div class="schat-rh" data-resize="ne"></div>
+  <div class="schat-rh" data-resize="sw"></div>
+  <div class="schat-rh" data-resize="se"></div>
+  <div class="schat-floatwin-header" id="schatFloatHeader">
+    <div style="display:flex;align-items:baseline">
+      <span class="schat-floatwin-title">// Chat</span>
+      <span class="schat-floatwin-sub">OpenClaw main session</span>
+    </div>
+    <div class="schat-floatwin-btns">
+      <button class="schat-floatwin-btn close" onclick="ChatFloat.close()" title="Dock back">&#x2715;</button>
+    </div>
+  </div>
+  <div class="schat-float-body" id="schatFloatBody"></div>
+</div>
 
 <!-- ===== SESSION INSPECTOR DRAWER ===== -->
 <div class="session-drawer-overlay" id="sessionDrawerOverlay" onclick="SessionInspector.close()"></div>
@@ -3161,7 +3258,124 @@ Renderer.renderCronGrid = function(crons) {
   QuickActions.populateCrons(crons);
 };
 
+// === ChatFloat — floating resizable chat window ===
+const ChatFloat = {
+  win: null, body: null, section: null, panel: null,
+  _floating: false,
+
+  init() {
+    this.win     = document.getElementById('schatFloatWin');
+    this.body    = document.getElementById('schatFloatBody');
+    this.section = document.getElementById('oc-body-chat');
+    this.panel   = document.getElementById('schatPanel');
+    this._bindDrag();
+    this._bindResize();
+    this._loadState();
+  },
+
+  popOut() {
+    if (this._floating) { this.win.style.zIndex='500'; return; }
+    this._floating = true;
+    if (this.panel) this.body.appendChild(this.panel);
+    this.win.style.display = 'flex';
+    if (!Sections._state['chat']) Sections.toggle('chat');
+    const btn = document.getElementById('schatPopBtn');
+    if (btn) btn.textContent = '⊟ Dock';
+    this._syncH();
+    if (typeof SessionChat !== 'undefined') SessionChat.scrollBottom();
+    this._save();
+  },
+
+  close() {
+    if (!this._floating) return;
+    this._floating = false;
+    if (this.panel) this.section.appendChild(this.panel);
+    this.win.style.display = 'none';
+    if (Sections._state['chat']) Sections.toggle('chat');
+    const btn = document.getElementById('schatPopBtn');
+    if (btn) btn.textContent = '⊞ Float';
+    const hist = document.getElementById('schatHistory');
+    if (hist) hist.style.height = '360px';
+    if (typeof SessionChat !== 'undefined') SessionChat.scrollBottom();
+    this._save();
+  },
+
+  _syncH() {
+    const hist = document.getElementById('schatHistory');
+    if (!hist || !this._floating) return;
+    const hdrH  = (document.getElementById('schatFloatHeader') || {offsetHeight:32}).offsetHeight;
+    const inpH  = (document.querySelector('.schat-input-area')  || {offsetHeight:80}).offsetHeight;
+    hist.style.height = Math.max(100, this.win.offsetHeight - hdrH - inpH - 10) + 'px';
+  },
+
+  _anchor() {
+    const r = this.win.getBoundingClientRect();
+    this.win.style.left = r.left + 'px'; this.win.style.top = r.top + 'px';
+    this.win.style.right = 'auto'; this.win.style.bottom = 'auto';
+    return r;
+  },
+
+  _bindDrag() {
+    const hdr = document.getElementById('schatFloatHeader');
+    hdr.addEventListener('mousedown', e => {
+      if (e.target.closest('button')) return;
+      const r = this._anchor();
+      const ox = e.clientX - r.left, oy = e.clientY - r.top;
+      const mm = e2 => {
+        this.win.style.left = Math.max(0, Math.min(window.innerWidth-80, e2.clientX-ox)) + 'px';
+        this.win.style.top  = Math.max(0, Math.min(window.innerHeight-40,e2.clientY-oy)) + 'px';
+      };
+      const mu = () => { document.removeEventListener('mousemove',mm); document.removeEventListener('mouseup',mu); this._save(); };
+      document.addEventListener('mousemove',mm); document.addEventListener('mouseup',mu);
+    });
+  },
+
+  _bindResize() {
+    this.win.querySelectorAll('.schat-rh').forEach(h => {
+      h.addEventListener('mousedown', e => {
+        e.preventDefault(); e.stopPropagation();
+        const dir = h.dataset.resize;
+        const r = this._anchor();
+        const sx=e.clientX, sy=e.clientY, sw=r.width, sh=r.height, sl=r.left, st=r.top;
+        const mm = e2 => {
+          const dx=e2.clientX-sx, dy=e2.clientY-sy;
+          let w=sw, ht=sh, l=sl, t=st;
+          if (dir.includes('e')) w  = Math.max(280, sw+dx);
+          if (dir.includes('s')) ht = Math.max(300, sh+dy);
+          if (dir.includes('w')) { w=Math.max(280,sw-dx); l=sl+sw-w; }
+          if (dir.includes('n')) { ht=Math.max(300,sh-dy); t=st+sh-ht; }
+          this.win.style.width=w+'px'; this.win.style.height=ht+'px';
+          this.win.style.left=l+'px';  this.win.style.top=t+'px';
+          this._syncH();
+        };
+        const mu = () => { document.removeEventListener('mousemove',mm); document.removeEventListener('mouseup',mu); this._save(); };
+        document.addEventListener('mousemove',mm); document.addEventListener('mouseup',mu);
+      });
+    });
+  },
+
+  _save() {
+    try { localStorage.setItem('ocDash:chatfloat', JSON.stringify({
+      f: this._floating, l: this.win.style.left, t: this.win.style.top,
+      w: this.win.offsetWidth, h: this.win.offsetHeight
+    })); } catch(e) {}
+  },
+
+  _loadState() {
+    try {
+      const s = JSON.parse(localStorage.getItem('ocDash:chatfloat')||'null');
+      if (!s) return;
+      if (s.w>0) this.win.style.width  = s.w+'px';
+      if (s.h>0) this.win.style.height = s.h+'px';
+      if (s.l) { this.win.style.left=s.l; this.win.style.right='auto'; }
+      if (s.t) { this.win.style.top=s.t;  this.win.style.bottom='auto'; }
+      if (s.f) this.popOut();
+    } catch(e) {}
+  }
+};
+
 App.init();
+  ChatFloat.init();
 
 // === OCUI ===
 window.OCUI = {
@@ -3250,6 +3464,7 @@ document.addEventListener('mousemove', function(e) {
   }, 500);
 })();
 </script>
+
 
 </body>
 </html>
