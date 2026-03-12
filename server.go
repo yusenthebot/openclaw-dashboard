@@ -121,6 +121,9 @@ type Server struct {
 
 	// Chat rate limiter (10 req/min per IP)
 	chatLimiter chatRateLimiter
+
+	// Session chat rate limiter (6 req/min per IP)
+	sessionLimiter sessionChatLimiter
 }
 
 func NewServer(dir, version string, cfg Config, gatewayToken string, indexHTML []byte, serverCtx context.Context) *Server {
@@ -206,6 +209,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodPost && r.URL.Path == "/api/chat":
 		s.handleChat(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/session/send":
+		s.handleSessionSend(w, r)
+	case isRead && r.URL.Path == "/api/session/stream":
+		s.handleSessionStream(w, r)
+	case isRead && r.URL.Path == "/api/session/history":
+		s.handleSessionChatHistory(w, r)
 	case isRead:
 		// Serve allowlisted static files from disk
 		if contentType, ok := allowedStatic[r.URL.Path]; ok {
