@@ -957,7 +957,8 @@ td.w { font-weight:600; color:var(--textStrong); }
           <input type="file" id="schatFileInput" style="display:none" multiple accept="image/*,.pdf,.txt,.md,.json,.js,.ts,.py,.go,.rs,.rb,.java,.c,.cpp,.h,.sh,.yaml,.yml,.toml,.csv" onchange="SessionChat.addFiles(this.files)">
           <textarea class="schat-textarea" id="schatTextarea" rows="1" placeholder="Message OpenClaw..."
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();SessionChat.send();}"
-            oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,90)+'px'"></textarea>
+            oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,90)+'px'"
+            onpaste="SessionChat.handlePaste(event)"></textarea>
           <button class="schat-send-btn" id="schatSendBtn" onclick="SessionChat.send()">SEND</button>
         </div>
         <div class="schat-status" id="schatStatus">&#x25CB; connecting...</div>
@@ -2428,6 +2429,16 @@ const SessionChat = {
         container.appendChild(pill);
       }
     });
+  },
+
+  handlePaste(e) {
+    const items = Array.from(e.clipboardData?.items || []);
+    const imgItem = items.find(i => i.type.startsWith('image/'));
+    if (!imgItem) return;
+    e.preventDefault();
+    const ext  = imgItem.type.split('/')[1].replace('jpeg','jpg') || 'png';
+    const file = new File([imgItem.getAsFile()], 'paste-' + Date.now() + '.' + ext, { type: imgItem.type });
+    this.addFile(file);
   },
 
   async send() {
