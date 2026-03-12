@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"html"
 	"io"
 	"log"
@@ -186,6 +188,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleSystem(w, r)
 	case isRead && strings.HasPrefix(r.URL.Path, "/api/refresh"):
 		s.handleRefresh(w, r)
+	case isRead && r.URL.Path == "/api/session-history":
+		s.handleSessionHistory(w, r)
+	case isRead && r.URL.Path == "/api/logs/stream":
+		s.handleLogsStream(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/actions/run-cron":
+		s.handleActionRunCron(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/actions/send-message":
+		s.handleActionSendMessage(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/actions/restart-gateway":
+		s.handleActionRestartGateway(w, r)
 	case r.Method == http.MethodOptions:
 		s.setCORSHeaders(w, r)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS")
@@ -494,6 +506,339 @@ func (s *Server) sendJSONRaw(w http.ResponseWriter, r *http.Request, status int,
 	w.WriteHeader(status)
 	if r.Method != http.MethodHead {
 		_, _ = w.Write(body)
+	}
+}
+
+// ── Session History endpoint ──
+func (s *Server) handleSessionHistory(w http.ResponseWriter, r *http.Request) {
+	agent := r.URL.Query().Get("agent")
+	session := r.URL.Query().Get("session")
+	limitStr := r.URL.Query().Get("limit")
+	if agent == "" {
+		agent = "main"
+	}
+	if session == "" {
+		s.sendJSON(w, r, http.StatusBadRequest, map[string]string{"error": "session parameter required"})
+		return
+	}
+	limit := 30
+	if limitStr != "" {
+		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	// Resolve session ID from sessions.json if needed
+	sessionID := session
+	home, _ := os.UserHomeDir()
+	sessionsJSON := filepath.Join(home, ".openclaw", "agents", agent, "sessions", "sessions.json")
+	if raw, err := os.ReadFile(sessionsJSON); err == nil {
+		var sessMap map[string]json.RawMessage
+		if json.Unmarshal(raw, &sessMap) == nil {
+			// Try sessionKey lookup first
+			if entry, ok := sessMap[session]; ok {
+				var parsed struct {
+					SessionID string `json:"sessionId"`
+				}
+				if json.Unmarshal(entry, &parsed) == nil && parsed.SessionID != "" {
+					sessionID = parsed.SessionID
+				}
+			}
+		}
+	}
+
+	jsonlPath := filepath.Join(home, ".openclaw", "agents", agent, "sessions", sessionID+".jsonl")
+	f, err := os.Open(jsonlPath)
+	if err != nil {
+		s.sendJSON(w, r, http.StatusNotFound, map[string]string{"error": "session file not found"})
+		return
+	}
+	defer f.Close()
+
+	type historyMsg struct {
+		Role      string `json:"role"`
+		Timestamp string `json:"timestamp"`
+		Text      string `json:"text"`
+		Tokens    int    `json:"tokens,omitempty"`
+	}
+
+	var allMsgs []historyMsg
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1MB line buffer
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		var entry struct {
+			Type      string `json:"type"`
+			Timestamp string `json:"timestamp"`
+			Message   struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+			Usage struct {
+				InputTokens  int `json:"inputTokens"`
+				OutputTokens int `json:"outputTokens"`
+			} `json:"usage"`
+		}
+		if json.Unmarshal(line, &entry) != nil || entry.Type != "message" {
+			continue
+		}
+		role := entry.Message.Role
+		if role == "" || role == "system" {
+			continue
+		}
+
+		// Parse content
+		var text string
+		// Try array of content blocks first
+		var blocks []struct {
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			ToolName string `json:"toolName"`
+			Name     string `json:"name"`
+		}
+		if json.Unmarshal(entry.Message.Content, &blocks) == nil {
+			var parts []string
+			for _, b := range blocks {
+				switch b.Type {
+				case "text":
+					if b.Text != "" {
+						parts = append(parts, b.Text)
+					}
+				case "toolCall", "tool_use":
+					name := b.Name
+					if name == "" {
+						name = b.ToolName
+					}
+					if name != "" {
+						parts = append(parts, "[tool: "+name+"]")
+					}
+				case "toolResult", "tool_result":
+					name := b.ToolName
+					if name == "" {
+						name = b.Name
+					}
+					if name != "" {
+						parts = append(parts, "[result: "+name+"]")
+					} else if b.Text != "" {
+						t := b.Text
+						if len(t) > 200 {
+							t = t[:200] + "…"
+						}
+						parts = append(parts, t)
+					}
+				}
+			}
+			text = strings.Join(parts, "\n")
+		} else {
+			// Try as plain string
+			var plain string
+			if json.Unmarshal(entry.Message.Content, &plain) == nil {
+				text = plain
+			}
+		}
+
+		if text == "" && role != "toolResult" {
+			continue
+		}
+
+		// Truncate to 300 chars
+		if utf8.RuneCountInString(text) > 300 {
+			runes := []rune(text)
+			text = string(runes[:300]) + "…"
+		}
+
+		tokens := entry.Usage.InputTokens + entry.Usage.OutputTokens
+		allMsgs = append(allMsgs, historyMsg{
+			Role:      role,
+			Timestamp: entry.Timestamp,
+			Text:      text,
+			Tokens:    tokens,
+		})
+	}
+
+	// Return last N messages
+	if len(allMsgs) > limit {
+		allMsgs = allMsgs[len(allMsgs)-limit:]
+	}
+
+	s.sendJSON(w, r, http.StatusOK, allMsgs)
+}
+
+// ── Action: Run Cron ──
+func (s *Server) handleActionRunCron(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	var req struct {
+		JobID string `json:"jobId"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil || req.JobID == "" {
+		s.sendJSON(w, r, http.StatusBadRequest, map[string]string{"error": "jobId required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "/opt/homebrew/bin/openclaw", "cron", "run", req.JobID)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		s.sendJSON(w, r, http.StatusInternalServerError, map[string]any{
+			"ok":     false,
+			"error":  err.Error(),
+			"output": string(out),
+		})
+		return
+	}
+	s.sendJSON(w, r, http.StatusOK, map[string]any{"ok": true, "output": string(out)})
+}
+
+// ── Action: Send Message ──
+func (s *Server) handleActionSendMessage(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	var req struct {
+		SessionKey string `json:"sessionKey"`
+		Message    string `json:"message"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&req); err != nil || req.Message == "" {
+		s.sendJSON(w, r, http.StatusBadRequest, map[string]string{"error": "message required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	var cmd *exec.Cmd
+	if req.SessionKey != "" && req.SessionKey != "agent:main:main" {
+		cmd = exec.CommandContext(ctx, "/opt/homebrew/bin/openclaw", "sessions", "send",
+			"--session", req.SessionKey, "--message", req.Message)
+	} else {
+		cmd = exec.CommandContext(ctx, "/opt/homebrew/bin/openclaw", "agent",
+			"--message", req.Message, "--json")
+	}
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		s.sendJSON(w, r, http.StatusInternalServerError, map[string]any{
+			"ok":     false,
+			"error":  err.Error(),
+			"output": string(out),
+		})
+		return
+	}
+	s.sendJSON(w, r, http.StatusOK, map[string]any{"ok": true, "output": string(out)})
+}
+
+// ── Action: Restart Gateway ──
+func (s *Server) handleActionRestartGateway(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "/opt/homebrew/bin/openclaw", "gateway", "restart")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		s.sendJSON(w, r, http.StatusInternalServerError, map[string]any{
+			"ok":     false,
+			"error":  err.Error(),
+			"output": string(out),
+		})
+		return
+	}
+	s.sendJSON(w, r, http.StatusOK, map[string]any{"ok": true, "output": string(out)})
+}
+
+// ── Live Log Streamer (SSE) ──
+func (s *Server) handleLogsStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	s.setCORSHeaders(w, r)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	ctx := r.Context()
+
+	type logSource struct {
+		path   string
+		source string
+	}
+	sources := []logSource{
+		{"/tmp/dash.log", "dash"},
+	}
+	// Try to find gateway log
+	home, _ := os.UserHomeDir()
+	gwLogPaths := []string{
+		filepath.Join(home, ".openclaw", "gateway.log"),
+		"/tmp/openclaw-gateway.log",
+	}
+	for _, p := range gwLogPaths {
+		if _, err := os.Stat(p); err == nil {
+			sources = append(sources, logSource{p, "gateway"})
+			break
+		}
+	}
+
+	// Tail each source from end
+	type tailState struct {
+		path   string
+		source string
+		offset int64
+	}
+	var tails []tailState
+	for _, src := range sources {
+		info, err := os.Stat(src.path)
+		offset := int64(0)
+		if err == nil {
+			offset = info.Size()
+		}
+		tails = append(tails, tailState{path: src.path, source: src.source, offset: offset})
+	}
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for i := range tails {
+				t := &tails[i]
+				f, err := os.Open(t.path)
+				if err != nil {
+					continue
+				}
+				info, err := f.Stat()
+				if err != nil {
+					f.Close()
+					continue
+				}
+				// Handle file truncation (log rotation)
+				if info.Size() < t.offset {
+					t.offset = 0
+				}
+				if info.Size() == t.offset {
+					f.Close()
+					continue
+				}
+				f.Seek(t.offset, io.SeekStart)
+				scanner := bufio.NewScanner(f)
+				for scanner.Scan() {
+					line := scanner.Text()
+					ts := time.Now().UTC().Format(time.RFC3339)
+					evt := fmt.Sprintf(`{"ts":"%s","line":"%s","source":"%s"}`,
+						ts,
+						strings.ReplaceAll(strings.ReplaceAll(line, `\`, `\\`), `"`, `\"`),
+						t.source)
+					fmt.Fprintf(w, "data: %s\n\n", evt)
+				}
+				t.offset, _ = f.Seek(0, io.SeekCurrent)
+				f.Close()
+			}
+			flusher.Flush()
+		}
 	}
 }
 

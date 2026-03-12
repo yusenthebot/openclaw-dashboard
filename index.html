@@ -627,6 +627,80 @@ td.w { font-weight:600; color:var(--textStrong); }
 .cost-value.token-mode { color: var(--cyan); text-shadow: 0 0 16px rgba(122,188,184,0.45); font-size: 1.35rem; }
 .cost-note { font-size: 9px; color: var(--dim); letter-spacing: 0.1em; text-transform: uppercase; margin-top: 4px; padding: 3px 8px; border: 1px solid rgba(122,188,184,0.2); display: inline-block; }
 
+/* ── Session Inspector Drawer ── */
+.session-drawer-overlay {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:300;
+}
+.session-drawer-overlay.open { display:block; }
+.session-drawer {
+  position:fixed; top:0; right:-500px; width:480px; height:100vh; z-index:301;
+  background:rgba(38,32,18,0.98); border-left:1px solid var(--border);
+  backdrop-filter:blur(20px); display:flex; flex-direction:column;
+  transition:right 0.3s cubic-bezier(.25,.8,.25,1);
+  box-shadow:-4px 0 30px rgba(0,0,0,0.5);
+}
+.session-drawer.open { right:0; }
+.sd-header { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border); background:rgba(168,184,122,0.04); }
+.sd-header-title { font-size:13px; font-weight:700; color:var(--textStrong); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:340px; }
+.sd-header-meta { display:flex; align-items:center; gap:8px; margin-top:4px; }
+.sd-close { background:none; border:none; color:var(--dim); font-size:20px; cursor:pointer; font-family:inherit; transition:color 0.2s; padding:4px 8px; }
+.sd-close:hover { color:var(--accent); }
+.sd-messages { flex:1; overflow-y:auto; padding:12px 16px; display:flex; flex-direction:column; gap:8px; }
+.sd-msg { padding:8px 12px; border-left:3px solid var(--border); font-size:11px; line-height:1.5; }
+.sd-msg-user { border-color:var(--accent); background:rgba(168,184,122,0.06); }
+.sd-msg-assistant { border-color:var(--cyan); background:rgba(122,188,184,0.06); }
+.sd-msg-tool, .sd-msg-toolresult { border-color:var(--purple); background:rgba(168,144,200,0.06); cursor:pointer; }
+.sd-msg-tool .sd-msg-text, .sd-msg-toolresult .sd-msg-text { max-height:40px; overflow:hidden; transition:max-height 0.3s; }
+.sd-msg-tool.expanded .sd-msg-text, .sd-msg-toolresult.expanded .sd-msg-text { max-height:none; }
+.sd-role-badge { display:inline-block; font-size:8px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; padding:2px 6px; margin-right:6px; border:1px solid; }
+.sd-role-user { color:var(--accent); border-color:rgba(168,184,122,0.4); background:rgba(168,184,122,0.1); }
+.sd-role-assistant { color:var(--cyan); border-color:rgba(122,188,184,0.4); background:rgba(122,188,184,0.1); }
+.sd-role-tool { color:var(--purple); border-color:rgba(168,144,200,0.4); background:rgba(168,144,200,0.1); }
+.sd-msg-ts { font-size:9px; color:var(--dim); margin-left:8px; }
+.sd-msg-tokens { font-size:9px; color:var(--dim); margin-left:auto; }
+.sd-msg-text { margin-top:4px; color:var(--text); white-space:pre-wrap; word-break:break-word; font-size:11px; }
+.sd-input { display:flex; gap:0; border-top:1px solid var(--border); }
+.sd-textarea { flex:1; background:transparent; border:none; color:var(--text); font-family:inherit; font-size:11px; padding:10px 14px; outline:none; resize:none; min-height:60px; }
+.sd-send { background:transparent; border-left:1px solid var(--border); color:var(--accent); font-family:inherit; font-size:11px; padding:10px 16px; cursor:pointer; letter-spacing:0.1em; transition:all 0.2s; text-transform:uppercase; align-self:stretch; }
+.sd-send:hover { background:rgba(168,184,122,0.08); }
+.sd-send:disabled { opacity:0.4; cursor:not-allowed; }
+.sd-loading { text-align:center; color:var(--dim); padding:20px; font-size:11px; }
+.sess-eye-btn { background:none; border:1px solid var(--border); color:var(--dim); font-size:12px; cursor:pointer; padding:2px 6px; margin-left:6px; transition:all 0.2s; border-radius:2px; }
+.sess-eye-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+/* ── Quick Actions ── */
+.qa-grid { display:flex; gap:10px; flex-wrap:wrap; }
+.qa-card { background:rgba(68,54,29,0.92); border:1px solid var(--border); padding:12px 14px; flex:1; min-width:200px; transition:all 0.3s; backdrop-filter:blur(12px); }
+.qa-card:hover { border-color:var(--accent); }
+.qa-card-title { font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:var(--dim); margin-bottom:8px; display:flex; align-items:center; gap:6px; }
+.qa-card-title span.qa-icon { font-size:14px; }
+.qa-row { display:flex; align-items:center; gap:6px; }
+.qa-select { background:rgba(0,0,0,0.3); border:1px solid var(--border); color:var(--text); font-family:inherit; font-size:11px; padding:5px 8px; flex:1; outline:none; }
+.qa-select option { background:#1B1710; color:var(--text); }
+.qa-btn { background:rgba(168,184,122,0.08); border:1px solid var(--accent); color:var(--accent); font-family:inherit; font-size:10px; letter-spacing:0.1em; padding:5px 14px; cursor:pointer; text-transform:uppercase; transition:all 0.2s; white-space:nowrap; }
+.qa-btn:hover { background:rgba(168,184,122,0.18); }
+.qa-btn:disabled { opacity:0.4; cursor:not-allowed; }
+.qa-btn.danger { border-color:var(--orange); color:var(--orange); background:rgba(212,144,90,0.08); }
+.qa-btn.danger:hover { background:rgba(212,144,90,0.18); }
+.qa-textarea { background:rgba(0,0,0,0.3); border:1px solid var(--border); color:var(--text); font-family:inherit; font-size:11px; padding:6px 8px; flex:1; outline:none; resize:none; min-height:40px; }
+
+/* ── Toast ── */
+.toast-container { position:fixed; top:16px; right:16px; z-index:400; display:flex; flex-direction:column; gap:6px; pointer-events:none; }
+.toast { background:rgba(38,32,18,0.95); border:1px solid var(--accent); color:var(--accent); font-family:inherit; font-size:11px; padding:8px 14px; letter-spacing:0.05em; backdrop-filter:blur(12px); pointer-events:auto; animation:toastIn 0.3s ease; }
+.toast.error { border-color:var(--red); color:var(--red); }
+@keyframes toastIn { from{opacity:0;transform:translateX(20px)} to{opacity:1;transform:translateX(0)} }
+
+/* ── Live Logs ── */
+.log-terminal { background:#0a0a08; border:1px solid var(--border); height:300px; overflow-y:auto; padding:10px 14px; font-family:'JetBrains Mono',monospace; font-size:10px; line-height:1.6; }
+.log-line { white-space:pre-wrap; word-break:break-all; }
+.log-line.error { color:var(--red); }
+.log-line.warn { color:var(--yellow); }
+.log-line.dash { color:var(--cyan); }
+.log-line.default { color:var(--dim); }
+.log-controls { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.log-ctrl-btn { background:none; border:1px solid var(--border); color:var(--dim); font-family:inherit; font-size:9px; letter-spacing:0.12em; padding:4px 10px; cursor:pointer; text-transform:uppercase; transition:all 0.2s; }
+.log-ctrl-btn:hover { border-color:var(--accent); color:var(--accent); }
+.log-ctrl-btn.active { background:rgba(168,184,122,0.08); color:var(--accent); border-color:var(--accent); }
 </style>
 </head>
 <body>
@@ -692,6 +766,45 @@ td.w { font-weight:600; color:var(--textStrong); }
   </div>
   <div class="oc-section-body" id="oc-body-alerts">
     <div id="alertsSection" aria-live="polite"></div>
+  </div>
+</section>
+
+<!-- ===== QUICK ACTIONS ===== -->
+<section class="oc-section" data-section="quick-actions">
+  <div class="oc-section-header">
+    <button class="oc-section-toggle" aria-expanded="true" aria-controls="oc-body-quick-actions" onclick="Sections.toggle('quick-actions')">
+      <span class="section-title">// Quick Actions</span><span class="oc-chevron">▼</span>
+    </button>
+  </div>
+  <div class="oc-section-body" id="oc-body-quick-actions">
+    <div class="qa-grid" id="qaGrid">
+      <div class="qa-card">
+        <div class="qa-card-title"><span class="qa-icon">▶</span> Run Cron</div>
+        <div class="qa-row">
+          <select class="qa-select" id="qaCronSelect"><option value="">— select job —</option></select>
+          <button class="qa-btn" id="qaCronBtn" onclick="QuickActions.runCron()">Run</button>
+        </div>
+      </div>
+      <div class="qa-card">
+        <div class="qa-card-title"><span class="qa-icon">💬</span> Send to Main</div>
+        <div class="qa-row">
+          <textarea class="qa-textarea" id="qaMsgInput" rows="2" placeholder="message..."></textarea>
+          <button class="qa-btn" id="qaMsgBtn" onclick="QuickActions.sendMessage()">Send</button>
+        </div>
+      </div>
+      <div class="qa-card">
+        <div class="qa-card-title"><span class="qa-icon">🔄</span> Sync Now</div>
+        <div class="qa-row">
+          <button class="qa-btn" onclick="QuickActions.syncNow()" style="flex:1">Refresh Dashboard</button>
+        </div>
+      </div>
+      <div class="qa-card">
+        <div class="qa-card-title"><span class="qa-icon">⟳</span> Restart Gateway</div>
+        <div class="qa-row">
+          <button class="qa-btn danger" id="qaGwBtn" onclick="QuickActions.restartGateway()">Restart</button>
+        </div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -1012,7 +1125,52 @@ td.w { font-weight:600; color:var(--textStrong); }
   </div>
 </section>
 
+<!-- ===== LIVE LOGS ===== -->
+<section class="oc-section collapsed" data-section="live-logs">
+  <div class="oc-section-header">
+    <button class="oc-section-toggle" aria-expanded="false" aria-controls="oc-body-live-logs" onclick="Sections.toggle('live-logs')">
+      <span class="section-title">// Live Logs</span><span class="oc-chevron">▼</span>
+    </button>
+  </div>
+  <div class="oc-section-body" id="oc-body-live-logs" style="display:none">
+    <div class="log-controls">
+      <button class="log-ctrl-btn" id="logClearBtn" onclick="LiveLogs.clear()">Clear</button>
+      <button class="log-ctrl-btn active" id="logPauseBtn" onclick="LiveLogs.togglePause()">⏸ Pause</button>
+      <button class="log-ctrl-btn active" id="logFilterAll" onclick="LiveLogs.setFilter('all')">All</button>
+      <button class="log-ctrl-btn" id="logFilterDash" onclick="LiveLogs.setFilter('dash')">Dash</button>
+      <button class="log-ctrl-btn" id="logFilterGw" onclick="LiveLogs.setFilter('gateway')">Gateway</button>
+      <span style="margin-left:auto;font-size:9px;color:var(--dim)" id="logStatus">● Connecting…</span>
+    </div>
+    <div class="log-terminal" id="logTerminal"></div>
+  </div>
+</section>
+
 </div><!-- /#app -->
+
+<!-- ===== SESSION INSPECTOR DRAWER ===== -->
+<div class="session-drawer-overlay" id="sessionDrawerOverlay" onclick="SessionInspector.close()"></div>
+<div class="session-drawer" id="sessionDrawer">
+  <div class="sd-header">
+    <div>
+      <div class="sd-header-title" id="sdTitle">Session</div>
+      <div class="sd-header-meta">
+        <span class="badge badge-active" id="sdModel" style="font-size:8px"></span>
+        <span class="badge badge-ok" id="sdContext" style="font-size:8px"></span>
+      </div>
+    </div>
+    <button class="sd-close" onclick="SessionInspector.close()">✕</button>
+  </div>
+  <div class="sd-messages" id="sdMessages">
+    <div class="sd-loading">Click a session to inspect</div>
+  </div>
+  <div class="sd-input">
+    <textarea class="sd-textarea" id="sdMsgInput" rows="3" placeholder="Send message to session..."></textarea>
+    <button class="sd-send" id="sdSendBtn" onclick="SessionInspector.send()">Send</button>
+  </div>
+</div>
+
+<!-- ===== TOAST CONTAINER ===== -->
+<div class="toast-container" id="toastContainer"></div>
 
 <!-- ===== CHAT FAB ===== -->
 <button class="chat-fab" onclick="Chat.toggle()" title="AI Chat">⌥</button>
@@ -2435,7 +2593,299 @@ const BillingMode = {
   },
 };
 
+// === Toast ===
+const Toast = {
+  show(msg, isError) {
+    const el = document.createElement('div');
+    el.className = 'toast' + (isError ? ' error' : '');
+    el.textContent = msg;
+    $('toastContainer').appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 3000);
+  }
+};
+
+// === Session Inspector ===
+const SessionInspector = {
+  _currentSession: null,
+  _currentKey: null,
+
+  open(sessionData) {
+    this._currentSession = sessionData;
+    this._currentKey = sessionData.key || '';
+    $('sdTitle').textContent = sessionData.name || sessionData.key || 'Session';
+    $('sdModel').textContent = (sessionData.model || '').replace('anthropic/', '');
+    const pct = sessionData.contextPct || 0;
+    $('sdContext').textContent = pct.toFixed(0) + '% ctx';
+    $('sdContext').className = 'badge ' + (pct > 80 ? 'badge-err' : pct > 50 ? 'badge-active' : 'badge-ok');
+    $('sdMessages').innerHTML = '<div class="sd-loading">Loading messages…</div>';
+    $('sessionDrawerOverlay').classList.add('open');
+    $('sessionDrawer').classList.add('open');
+    this.loadHistory(sessionData);
+  },
+
+  close() {
+    $('sessionDrawerOverlay').classList.remove('open');
+    $('sessionDrawer').classList.remove('open');
+    this._currentSession = null;
+  },
+
+  async loadHistory(s) {
+    const agent = (s.key || '').split(':')[1] || 'main';
+    const sessionKey = s.key || '';
+    try {
+      const r = await fetch('/api/session-history?agent=' + encodeURIComponent(agent) + '&session=' + encodeURIComponent(sessionKey) + '&limit=30');
+      const msgs = await r.json();
+      if (msgs.error) {
+        $('sdMessages').innerHTML = '<div class="sd-loading">' + esc(msgs.error) + '</div>';
+        return;
+      }
+      if (!msgs.length) {
+        $('sdMessages').innerHTML = '<div class="sd-loading">No messages found</div>';
+        return;
+      }
+      const roleMap = {
+        'user': 'user', 'human': 'user',
+        'assistant': 'assistant',
+        'toolResult': 'tool', 'tool_result': 'tool', 'tool': 'tool',
+        'toolCall': 'tool', 'tool_use': 'tool'
+      };
+      const roleLabels = { 'user': 'USER', 'assistant': 'ASSISTANT', 'tool': 'TOOL' };
+      $('sdMessages').innerHTML = msgs.map(m => {
+        const r = roleMap[m.role] || 'tool';
+        const label = roleLabels[r];
+        const ts = m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : '';
+        const tokStr = m.tokens ? m.tokens.toLocaleString() + ' tok' : '';
+        const isToolMsg = r === 'tool';
+        return '<div class="sd-msg sd-msg-' + r + (isToolMsg ? '' : '') + '"' +
+          (isToolMsg ? ' onclick="this.classList.toggle(\'expanded\')"' : '') + '>' +
+          '<div style="display:flex;align-items:center">' +
+          '<span class="sd-role-badge sd-role-' + r + '">' + label + '</span>' +
+          '<span class="sd-msg-ts">' + esc(ts) + '</span>' +
+          (tokStr ? '<span class="sd-msg-tokens">' + esc(tokStr) + '</span>' : '') +
+          '</div>' +
+          '<div class="sd-msg-text">' + esc(m.text || '') + '</div>' +
+          '</div>';
+      }).join('');
+      $('sdMessages').scrollTop = $('sdMessages').scrollHeight;
+    } catch (e) {
+      $('sdMessages').innerHTML = '<div class="sd-loading">Error: ' + esc(e.message) + '</div>';
+    }
+  },
+
+  async send() {
+    const msg = $('sdMsgInput').value.trim();
+    if (!msg || !this._currentKey) return;
+    $('sdSendBtn').disabled = true;
+    try {
+      const r = await fetch('/api/actions/send-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionKey: this._currentKey, message: msg })
+      });
+      const data = await r.json();
+      if (data.ok) {
+        Toast.show('Message sent');
+        $('sdMsgInput').value = '';
+        // Reload history after a short delay
+        setTimeout(() => { if (this._currentSession) this.loadHistory(this._currentSession); }, 2000);
+      } else {
+        Toast.show('Error: ' + (data.error || 'unknown'), true);
+      }
+    } catch (e) {
+      Toast.show('Network error: ' + e.message, true);
+    } finally {
+      $('sdSendBtn').disabled = false;
+    }
+  }
+};
+
+// === Quick Actions ===
+const QuickActions = {
+  populateCrons(crons) {
+    const sel = $('qaCronSelect');
+    if (!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">— select job —</option>';
+    (crons || []).forEach(c => {
+      sel.innerHTML += '<option value="' + esc(c.name || c.id || '') + '">' + esc(c.name || 'Unnamed') + '</option>';
+    });
+    if (prev) sel.value = prev;
+  },
+
+  async runCron() {
+    const jobId = $('qaCronSelect').value;
+    if (!jobId) { Toast.show('Select a cron job first', true); return; }
+    const btn = $('qaCronBtn'); btn.disabled = true; btn.textContent = '…';
+    try {
+      const r = await fetch('/api/actions/run-cron', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId })
+      });
+      const d = await r.json();
+      Toast.show(d.ok ? 'Cron "' + jobId + '" triggered' : 'Error: ' + (d.error || 'unknown'), !d.ok);
+    } catch (e) { Toast.show('Network error', true); }
+    finally { btn.disabled = false; btn.textContent = 'Run'; }
+  },
+
+  async sendMessage() {
+    const msg = $('qaMsgInput').value.trim();
+    if (!msg) { Toast.show('Enter a message', true); return; }
+    const btn = $('qaMsgBtn'); btn.disabled = true; btn.textContent = '…';
+    try {
+      const r = await fetch('/api/actions/send-message', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionKey: 'agent:main:main', message: msg })
+      });
+      const d = await r.json();
+      if (d.ok) { Toast.show('Message sent to main'); $('qaMsgInput').value = ''; }
+      else Toast.show('Error: ' + (d.error || 'unknown'), true);
+    } catch (e) { Toast.show('Network error', true); }
+    finally { btn.disabled = false; btn.textContent = 'Send'; }
+  },
+
+  syncNow() { App.refresh(); Toast.show('Dashboard refreshed'); },
+
+  async restartGateway() {
+    if (!confirm('Restart the OpenClaw gateway?')) return;
+    const btn = $('qaGwBtn'); btn.disabled = true; btn.textContent = '…';
+    try {
+      const r = await fetch('/api/actions/restart-gateway', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const d = await r.json();
+      Toast.show(d.ok ? 'Gateway restarting…' : 'Error: ' + (d.error || 'unknown'), !d.ok);
+    } catch (e) { Toast.show('Network error', true); }
+    finally { btn.disabled = false; btn.textContent = 'Restart'; }
+  }
+};
+
+// === Live Logs ===
+const LiveLogs = {
+  _es: null,
+  _paused: false,
+  _filter: 'all',
+  _lines: [],
+  _maxLines: 500,
+  _retryMs: 1000,
+  _retryTimer: null,
+
+  init() {
+    this.connect();
+  },
+
+  connect() {
+    if (this._es) { try { this._es.close(); } catch(e){} }
+    $('logStatus').textContent = '● Connecting…';
+    $('logStatus').style.color = 'var(--yellow)';
+    this._es = new EventSource('/api/logs/stream');
+    this._es.onopen = () => {
+      $('logStatus').textContent = '● Connected';
+      $('logStatus').style.color = 'var(--green)';
+      this._retryMs = 1000;
+    };
+    this._es.onmessage = (e) => {
+      if (this._paused) return;
+      try {
+        const d = JSON.parse(e.data);
+        if (this._filter !== 'all' && d.source !== this._filter) return;
+        this.addLine(d);
+      } catch(err) {}
+    };
+    this._es.onerror = () => {
+      $('logStatus').textContent = '● Disconnected';
+      $('logStatus').style.color = 'var(--red)';
+      this._es.close();
+      // Exponential backoff reconnect
+      clearTimeout(this._retryTimer);
+      this._retryTimer = setTimeout(() => this.connect(), this._retryMs);
+      this._retryMs = Math.min(this._retryMs * 2, 30000);
+    };
+  },
+
+  addLine(d) {
+    const term = $('logTerminal');
+    if (!term) return;
+    const el = document.createElement('div');
+    el.className = 'log-line ' + this.classifyLine(d.line);
+    const src = d.source === 'gateway' ? '[GW] ' : '[DASH] ';
+    el.textContent = (d.ts ? d.ts.split('T')[1].split('.')[0] + ' ' : '') + src + d.line;
+    term.appendChild(el);
+    this._lines.push(el);
+    while (this._lines.length > this._maxLines) { this._lines.shift().remove(); }
+    term.scrollTop = term.scrollHeight;
+  },
+
+  classifyLine(line) {
+    if (!line) return 'default';
+    const l = line.toLowerCase();
+    if (l.includes('error') || l.includes('fatal') || l.includes('panic')) return 'error';
+    if (l.includes('warn')) return 'warn';
+    if (l.includes('[dashboard]') || l.includes('[dash]')) return 'dash';
+    return 'default';
+  },
+
+  clear() {
+    $('logTerminal').innerHTML = '';
+    this._lines = [];
+  },
+
+  togglePause() {
+    this._paused = !this._paused;
+    $('logPauseBtn').textContent = this._paused ? '▶ Resume' : '⏸ Pause';
+    $('logPauseBtn').classList.toggle('active', !this._paused);
+  },
+
+  setFilter(f) {
+    this._filter = f;
+    ['logFilterAll','logFilterDash','logFilterGw'].forEach(id => {
+      $(id).classList.remove('active');
+    });
+    if (f === 'all') $('logFilterAll').classList.add('active');
+    else if (f === 'dash') $('logFilterDash').classList.add('active');
+    else $('logFilterGw').classList.add('active');
+  }
+};
+
+// Hook into session cards to add eye button & click handler
+const _origRenderSessionCards = Renderer.renderSessionCards;
+Renderer.renderSessionCards = function(sessions) {
+  _origRenderSessionCards.call(Renderer, sessions);
+  // Add eye buttons to session cards
+  const grid = $('sessCardsGrid');
+  if (!grid) return;
+  const cards = grid.querySelectorAll('.sess-card');
+  (sessions || []).forEach((s, i) => {
+    if (cards[i]) {
+      const top = cards[i].querySelector('.sess-card-top');
+      if (top && !top.querySelector('.sess-eye-btn')) {
+        const btn = document.createElement('button');
+        btn.className = 'sess-eye-btn';
+        btn.innerHTML = '👁';
+        btn.title = 'Inspect session';
+        btn.onclick = (e) => { e.stopPropagation(); SessionInspector.open(s); };
+        top.appendChild(btn);
+      }
+      cards[i].style.cursor = 'pointer';
+      cards[i].onclick = () => SessionInspector.open(s);
+    }
+  });
+};
+
+// Hook into cron render to populate Quick Actions dropdown
+const _origRenderCronGrid = Renderer.renderCronGrid;
+Renderer.renderCronGrid = function(crons) {
+  _origRenderCronGrid.call(Renderer, crons);
+  QuickActions.populateCrons(crons);
+};
+
+// Update SECTION_KEYS to include new sections
+SECTION_KEYS.push('quick-actions', 'live-logs');
+Sections.DEFAULTS['quick-actions'] = false;
+Sections.DEFAULTS['live-logs'] = true;
+
 App.init();
+LiveLogs.init();
 
 // === OCUI ===
 window.OCUI = {
