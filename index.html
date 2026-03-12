@@ -2438,7 +2438,7 @@ const SessionChat = {
     e.preventDefault();
     const ext  = imgItem.type.split('/')[1].replace('jpeg','jpg') || 'png';
     const file = new File([imgItem.getAsFile()], 'paste-' + Date.now() + '.' + ext, { type: imgItem.type });
-    this.addFile(file);
+    this.addFiles([file]);
   },
 
   async send() {
