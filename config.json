@@ -1,11 +1,12 @@
 {
   "bot": {
-    "name": "OpenClaw Dashboard",
-    "emoji": "\ud83e\udd9e"
+    "name": "MyAgent",
+    "emoji": "🤖"
   },
   "theme": {
     "preset": "midnight"
   },
+  "billingMode": "api",
   "timezone": "UTC",
   "refresh": {
     "intervalSeconds": 30

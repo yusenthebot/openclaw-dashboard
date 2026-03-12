@@ -67,14 +67,15 @@ type SystemConfig struct {
 }
 
 type Config struct {
-	Bot      BotConfig     `json:"bot"`
-	Theme    ThemeConfig   `json:"theme"`
-	Timezone string        `json:"timezone"`
-	Refresh  RefreshConfig `json:"refresh"`
-	Server   ServerConfig  `json:"server"`
-	AI       AIConfig      `json:"ai"`
-	Alerts   AlertsConfig  `json:"alerts"`
-	System   SystemConfig  `json:"system"`
+	Bot         BotConfig     `json:"bot"`
+	Theme       ThemeConfig   `json:"theme"`
+	Timezone    string        `json:"timezone"`
+	BillingMode string        `json:"billingMode"` // "api" | "subscription" | "local" | "" (auto-detect)
+	Refresh     RefreshConfig `json:"refresh"`
+	Server      ServerConfig  `json:"server"`
+	AI          AIConfig      `json:"ai"`
+	Alerts      AlertsConfig  `json:"alerts"`
+	System      SystemConfig  `json:"system"`
 }
 
 // defaults
