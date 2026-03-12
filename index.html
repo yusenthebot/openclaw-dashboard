@@ -82,7 +82,7 @@ body::after {
 .corner-tl::before, .corner-tl::after,
 .corner-br::before, .corner-br::after { content: ''; position: absolute; }
 
-#app { position: relative; z-index: 2; max-width: 1480px; margin: 0 auto; padding: 16px 20px; }
+#app { position: relative; z-index: 2; max-width: 1480px; margin: 0 auto; padding: 16px 20px 60px; }
 
 /* ── Header ── */
 .hdr {
@@ -251,7 +251,7 @@ body::after {
   border: 1px solid var(--border); padding: 2px 8px;
   margin-left: 8px;
 }
-.oc-section-body { overflow: hidden; padding-top: 2px; }
+.oc-section-body { overflow: visible; padding-top: 2px; }
 .oc-global-controls { display: flex; gap: 8px; margin-bottom: 12px; }
 .oc-global-btn { background:none; border:1px solid var(--border); color:var(--dim); font-family:inherit; font-size:9px; letter-spacing:0.15em; padding:4px 12px; cursor:pointer; text-transform:uppercase; transition:all 0.2s; }
 .oc-global-btn:hover { border-color:var(--accent); color:var(--accent); }
@@ -1126,7 +1126,7 @@ td.w { font-weight:600; color:var(--textStrong); }
 </section>
 
 <!-- ===== LIVE LOGS ===== -->
-<section class="oc-section collapsed" data-section="live-logs">
+<section class="oc-section collapsed" data-section="live-logs" style="margin-top:24px;border-top:1px solid var(--border);padding-top:8px">
   <div class="oc-section-header">
     <button class="oc-section-toggle" aria-expanded="false" aria-controls="oc-body-live-logs" onclick="Sections.toggle('live-logs')">
       <span class="section-title">// Live Logs</span><span class="oc-chevron">▼</span>
