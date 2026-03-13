@@ -2,7 +2,7 @@
 
 > A terminal-aesthetic control panel for [OpenClaw](https://github.com/openclaw/openclaw) Gateway — real-time agent monitoring, session chat with file/image upload, billing-aware cost display, and a warm "Subdued Succulent" dark theme.
 
-![Dashboard Overview](screenshots/00-full.jpg)
+![Dashboard Overview](screenshots/00-full-dashboard.png)
 
 ---
 
