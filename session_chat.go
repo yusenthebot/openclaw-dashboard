@@ -289,7 +289,7 @@ func (s *Server) handleSessionSend(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, "openclaw", "agent", "--message", finalMessage)
+		cmd := exec.CommandContext(ctx, "openclaw", "agent", "--message", finalMessage, "--session-id", "dashboard-chat-session")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			log.Printf("[session-chat] send error: %v — %s", err, string(out))
 		}
@@ -314,12 +314,11 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Find active JSONL
-	jsonlPath, err := findActiveSessionJSONL()
-	if err != nil {
-		fmt.Fprintf(w, "data: {\"error\":\"no session found\"}\n\n")
-		flusher.Flush()
-		return
+	// Use dedicated dashboard chat session
+	home, _ := os.UserHomeDir()
+	jsonlPath := filepath.Join(home, ".openclaw", "agents", "main", "sessions", "dashboard-chat-session.jsonl")
+	if _, ferr := os.Stat(jsonlPath); os.IsNotExist(ferr) {
+		if f, cerr := os.Create(jsonlPath); cerr == nil { f.Close() }
 	}
 
 	// Send history (last 30)
@@ -349,13 +348,6 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, ": heartbeat\n\n")
 			flusher.Flush()
 		case <-ticker.C:
-			// Check if JSONL file changed (re-find in case session rotated)
-			newPath, err := findActiveSessionJSONL()
-			if err == nil && newPath != jsonlPath {
-				jsonlPath = newPath
-				offset = 0
-			}
-
 			fi, err := os.Stat(jsonlPath)
 			if err != nil {
 				continue
@@ -398,9 +390,10 @@ func (s *Server) handleSessionChatHistory(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	jsonlPath, err := findActiveSessionJSONL()
-	if err != nil {
-		s.sendJSON(w, r, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+	home, _ := os.UserHomeDir()
+	jsonlPath := filepath.Join(home, ".openclaw", "agents", "main", "sessions", "dashboard-chat-session.jsonl")
+	if _, serr := os.Stat(jsonlPath); os.IsNotExist(serr) {
+		s.sendJSON(w, r, http.StatusOK, []interface{}{})
 		return
 	}
 
