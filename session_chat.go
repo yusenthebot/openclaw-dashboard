@@ -237,7 +237,8 @@ func (s *Server) handleSessionSend(w http.ResponseWriter, r *http.Request) {
 
 	// Handle file uploads
 	reqID := newUUID()
-	uploadDir := filepath.Join("/tmp", "dashboard-uploads", reqID)
+	home, _ := os.UserHomeDir()
+	uploadDir := filepath.Join(home, "clawd", "uploads", reqID)
 
 	files := r.MultipartForm.File["files[]"]
 	if len(files) > 5 {
