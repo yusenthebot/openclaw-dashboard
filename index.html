@@ -956,7 +956,7 @@ td.w { font-weight:600; color:var(--textStrong); }
           <button class="schat-clip-btn" title="Attach file" onclick="document.getElementById('schatFileInput').click()">&#x1F4CE;</button>
           <input type="file" id="schatFileInput" style="display:none" multiple accept="image/*,.pdf,.txt,.md,.json,.js,.ts,.py,.go,.rs,.rb,.java,.c,.cpp,.h,.sh,.yaml,.yml,.toml,.csv" onchange="SessionChat.addFiles(this.files)">
           <textarea class="schat-textarea" id="schatTextarea" rows="1" placeholder="Message OpenClaw..."
-            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();SessionChat.send();}"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();SessionChat.send();}"
             oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,90)+'px'"
             onpaste="SessionChat.handlePaste(event)"></textarea>
           <button class="schat-send-btn" id="schatSendBtn" onclick="SessionChat.send()">SEND</button>
